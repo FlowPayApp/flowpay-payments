@@ -1,0 +1,17 @@
+# Binarios
+/bin/
+/dist/
+*.exe
+
+# Entorno local
+.env
+.env.local
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Air (hot reload)
+tmp/
