@@ -13,7 +13,7 @@ const chargeClientLabelExpr = `COALESCE(NULLIF(TRIM(COALESCE(c.branch_name, ''))
 func (db *DB) ListChargesByClient(ctx context.Context, companyID, clientID int64) ([]model.Charge, error) {
 	q := `
 SELECT i.id, i.company_id, i.client_id, i.amount, i.due_date, i.paid_at,
-       i.attachment_token, i.created_at
+       i.attachment_token, i.attachment_ext, i.created_at
 FROM charges i
 JOIN clients c ON c.id = i.client_id
 WHERE i.company_id = $1 AND i.client_id = $2
@@ -38,7 +38,7 @@ ORDER BY i.due_date ASC, i.id ASC
 func (db *DB) GetCharge(ctx context.Context, companyID, chargeID int64) (*model.Charge, error) {
 	q := `
 SELECT i.id, i.company_id, i.client_id, i.amount, i.due_date, i.paid_at,
-       i.attachment_token, i.created_at
+       i.attachment_token, i.attachment_ext, i.created_at
 FROM charges i
 WHERE i.company_id = $1 AND i.id = $2
 `
@@ -114,8 +114,8 @@ type scannable interface {
 func scanCharge(rows *sql.Rows) (model.Charge, error) {
 	var ch model.Charge
 	var paidAt sql.NullTime
-	var atok sql.NullString
-	if err := rows.Scan(&ch.ID, &ch.CompanyID, &ch.ClientID, &ch.Amount, &ch.DueDate, &paidAt, &atok, &ch.CreatedAt); err != nil {
+	var atok, aext sql.NullString
+	if err := rows.Scan(&ch.ID, &ch.CompanyID, &ch.ClientID, &ch.Amount, &ch.DueDate, &paidAt, &atok, &aext, &ch.CreatedAt); err != nil {
 		return ch, err
 	}
 	if paidAt.Valid {
@@ -125,6 +125,10 @@ func scanCharge(rows *sql.Rows) (model.Charge, error) {
 	if atok.Valid {
 		s := atok.String
 		ch.AttachmentToken = &s
+	}
+	if aext.Valid {
+		s := aext.String
+		ch.AttachmentExt = &s
 	}
 	return ch, nil
 }
@@ -132,8 +136,8 @@ func scanCharge(rows *sql.Rows) (model.Charge, error) {
 func scanChargeRow(row *sql.Row) (model.Charge, error) {
 	var ch model.Charge
 	var paidAt sql.NullTime
-	var atok sql.NullString
-	if err := row.Scan(&ch.ID, &ch.CompanyID, &ch.ClientID, &ch.Amount, &ch.DueDate, &paidAt, &atok, &ch.CreatedAt); err != nil {
+	var atok, aext sql.NullString
+	if err := row.Scan(&ch.ID, &ch.CompanyID, &ch.ClientID, &ch.Amount, &ch.DueDate, &paidAt, &atok, &aext, &ch.CreatedAt); err != nil {
 		return ch, err
 	}
 	if paidAt.Valid {
@@ -143,6 +147,10 @@ func scanChargeRow(row *sql.Row) (model.Charge, error) {
 	if atok.Valid {
 		s := atok.String
 		ch.AttachmentToken = &s
+	}
+	if aext.Valid {
+		s := aext.String
+		ch.AttachmentExt = &s
 	}
 	return ch, nil
 }
