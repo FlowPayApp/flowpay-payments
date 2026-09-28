@@ -11,4 +11,5 @@ type Charge struct {
 	PaidAt          *time.Time
 	CreatedAt       time.Time
 	AttachmentToken *string
+	AttachmentExt   *string
 }

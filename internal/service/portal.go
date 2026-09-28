@@ -45,6 +45,7 @@ type PortalCharge struct {
 	DueDate         time.Time `json:"due_date"`
 	Status          string    `json:"status"`
 	AttachmentToken *string   `json:"attachment_token,omitempty"`
+	AttachmentExt   *string   `json:"attachment_ext,omitempty"`
 }
 
 func (s *PaymentsService) ResolvePaymentPortal(ctx context.Context, tokenValue string) (*PaymentPortalResponse, error) {
@@ -99,6 +100,7 @@ func (s *PaymentsService) ResolvePaymentPortal(ctx context.Context, tokenValue s
 			DueDate:         ch.DueDate,
 			Status:          st,
 			AttachmentToken: ch.AttachmentToken,
+			AttachmentExt:   ch.AttachmentExt,
 		}
 		out.Charges = append(out.Charges, pc)
 		switch st {
