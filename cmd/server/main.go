@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -60,8 +61,12 @@ func main() {
 	}
 
 	r := gin.Default()
+	r.Use(func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		c.Next()
+	})
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "http://127.0.0.1:5173"},
+		AllowOriginFunc:  allowBrowserOrigin,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
@@ -117,6 +122,19 @@ func tableExists(db *sql.DB, name string) bool {
 	var ok bool
 	err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=$1)`, name).Scan(&ok)
 	return err == nil && ok
+}
+
+func allowBrowserOrigin(origin string) bool {
+	switch origin {
+	case "http://localhost:5173", "http://127.0.0.1:5173", "https://geldflus.com", "https://www.geldflus.com":
+		return true
+	}
+	for _, extra := range strings.Split(os.Getenv("FLOWPAY_CORS_ORIGINS"), ",") {
+		if strings.TrimSpace(extra) == origin && origin != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func safeDSN(raw string) string {
