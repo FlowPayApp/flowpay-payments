@@ -126,7 +126,10 @@ func tableExists(db *sql.DB, name string) bool {
 
 func allowBrowserOrigin(origin string) bool {
 	switch origin {
-	case "http://localhost:5173", "http://127.0.0.1:5173", "https://geldflus.com", "https://www.geldflus.com":
+	case "https://geldflus.com", "https://www.geldflus.com":
+		return true
+	}
+	if isLocalDevOrigin(origin) {
 		return true
 	}
 	for _, extra := range strings.Split(os.Getenv("FLOWPAY_CORS_ORIGINS"), ",") {
@@ -135,6 +138,15 @@ func allowBrowserOrigin(origin string) bool {
 		}
 	}
 	return false
+}
+
+func isLocalDevOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	host := u.Hostname()
+	return host == "localhost" || host == "127.0.0.1"
 }
 
 func safeDSN(raw string) string {
