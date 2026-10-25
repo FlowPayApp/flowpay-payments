@@ -20,6 +20,14 @@ type PaymentPortalCompany struct {
 	TransferInstructions string `json:"transfer_instructions,omitempty"`
 }
 
+// PaymentPortalMethods son los medios que el cliente puede elegir. Sin secretos.
+type PaymentPortalMethods struct {
+	Webpay   bool `json:"webpay"`
+	Khipu    bool `json:"khipu"`
+	Fintoc   bool `json:"fintoc"`
+	Transfer bool `json:"transfer"`
+}
+
 type PaymentPortalClient struct {
 	Label string `json:"label"`
 }
@@ -28,6 +36,7 @@ type PaymentPortalResponse struct {
 	TokenStatus string               `json:"token_status"`
 	IssuedAt    time.Time            `json:"issued_at"`
 	Company     PaymentPortalCompany `json:"company"`
+	Methods     PaymentPortalMethods `json:"methods"`
 	Client      PaymentPortalClient  `json:"client"`
 	Charges     []PortalCharge       `json:"charges"`
 	Totals      PaymentPortalTotals  `json:"totals"`
@@ -81,12 +90,22 @@ func (s *PaymentsService) ResolvePaymentPortal(ctx context.Context, tokenValue s
 	if err != nil {
 		return nil, err
 	}
+	webpayOn, khipuOn, fintocOn, err := s.Repo.CompanyPaymentMethods(ctx, row.CompanyID)
+	if err != nil {
+		return nil, err
+	}
 	out := &PaymentPortalResponse{
 		TokenStatus: row.Status,
 		IssuedAt:    row.CreatedAt,
 		Company: PaymentPortalCompany{
 			Name:                 cm.Name,
 			TransferInstructions: cm.TransferInstructions,
+		},
+		Methods: PaymentPortalMethods{
+			Webpay:   webpayOn,
+			Khipu:    khipuOn,
+			Fintoc:   fintocOn,
+			Transfer: strings.TrimSpace(cm.TransferInstructions) != "",
 		},
 		Client:  PaymentPortalClient{Label: label},
 		Charges: make([]PortalCharge, 0, len(charges)),

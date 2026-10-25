@@ -105,7 +105,9 @@ func writeWebpayError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "token no encontrado"})
 	case errors.Is(err, domain.ErrInvalidChargeRefs):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-	case errors.Is(err, domain.ErrWebpayNotConfigured):
+	case errors.Is(err, domain.ErrWebpayNotOffered):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case errors.Is(err, domain.ErrWebpayCredential):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrWebpayTxNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
