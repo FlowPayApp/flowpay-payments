@@ -1,8 +1,11 @@
 package config
 
 import (
+	"log"
 	"os"
 	"strings"
+
+	"github.com/flowpay/flowpay-payments/internal/secretbox"
 )
 
 type Config struct {
@@ -12,9 +15,8 @@ type Config struct {
 	JWTSecret             string
 	PublicBaseURL         string
 	FrontendBaseURL       string
-	TransbankCommerceCode string
-	TransbankAPIKey       string
 	TransbankEnvironment  string
+	PaymentCredentialsKey []byte
 }
 
 func envFirst(keys ...string) string {
@@ -56,10 +58,18 @@ func Load() Config {
 		JWTSecret:             envFirst("FLOWPAY_PAYMENTS_JWT_SECRET", "FLOWPAY_JWT_SECRET"),
 		PublicBaseURL:         publicURL("FLOWPAY_PAYMENTS_PUBLIC_BASE_URL", "FLOWPAY_PUBLIC_BASE_URL"),
 		FrontendBaseURL:       frontendBase,
-		TransbankCommerceCode: envFirst("FLOWPAY_PAYMENTS_TRANSBANK_COMMERCE_CODE", "FLOWPAY_TRANSBANK_COMMERCE_CODE"),
-		TransbankAPIKey:       envFirst("FLOWPAY_PAYMENTS_TRANSBANK_API_KEY", "FLOWPAY_TRANSBANK_API_KEY"),
 		TransbankEnvironment:  tbkEnv,
+		PaymentCredentialsKey: paymentCredentialsKey(),
 	}
+}
+
+func paymentCredentialsKey() []byte {
+	key, err := secretbox.KeyFromMaterial(os.Getenv("FLOWPAY_PAYMENT_CREDENTIALS_KEY"))
+	if err != nil {
+		log.Println("warn: FLOWPAY_PAYMENT_CREDENTIALS_KEY no está configurada; el enlace no puede cobrar con tarjeta")
+		return nil
+	}
+	return key
 }
 
 const productionOrigin = "https://geldflus.com"

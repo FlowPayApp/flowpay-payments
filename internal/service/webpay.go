@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"net/url"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/flowpay/flowpay-payments/internal/domain"
 	"github.com/flowpay/flowpay-payments/internal/gateway/transbank"
 	"github.com/flowpay/flowpay-payments/internal/model"
+	"github.com/flowpay/flowpay-payments/internal/secretbox"
 )
 
 type WebpayCheckoutResult struct {
@@ -31,15 +33,58 @@ type WebpayCommitResult struct {
 	Message           string  `json:"message,omitempty"`
 }
 
-func (s *PaymentsService) StartWebpayCheckout(ctx context.Context, portalToken string, chargeRefs []string) (*WebpayCheckoutResult, error) {
-	if !s.webpayEnabled() {
-		return nil, domain.ErrWebpayNotConfigured
+func (s *PaymentsService) companyWebpayClient(ctx context.Context, companyID int64) (*transbank.Client, error) {
+	commerce, apiKey, ok, err := s.Repo.CompanyWebpaySealed(ctx, companyID)
+	if err != nil {
+		return nil, err
 	}
-	if strings.TrimSpace(s.Webpay.PublicBaseURL) == "" {
+	if !ok {
+		return nil, domain.ErrWebpayNotOffered
+	}
+	env := ""
+	if s.Webpay != nil {
+		env = s.Webpay.Environment
+	}
+	client, err := webpayClientFromSecrets(s.PaymentKey, companyID, commerce, apiKey, env)
+	if errors.Is(err, domain.ErrWebpayCredential) {
+		log.Printf("[FlowPay Webpay] empresa %d: credencial no usable", companyID)
+	}
+	return client, err
+}
+
+func webpayClientFromSecrets(key []byte, companyID int64, commerceSealed, apiKeySealed, environment string) (*transbank.Client, error) {
+	if len(key) != 32 {
+		return nil, domain.ErrWebpayCredential
+	}
+	code, err := secretbox.Open(key, commerceSealed, webpayAAD(companyID, "webpay_commerce_code"))
+	if err != nil {
+		return nil, domain.ErrWebpayCredential
+	}
+	secret, err := secretbox.Open(key, apiKeySealed, webpayAAD(companyID, "webpay_api_key"))
+	if err != nil {
+		return nil, domain.ErrWebpayCredential
+	}
+	client := transbank.NewClient(environment, code, secret)
+	if !client.Enabled() {
+		return nil, domain.ErrWebpayNotOffered
+	}
+	return client, nil
+}
+
+func webpayAAD(companyID int64, column string) []byte {
+	return []byte(fmt.Sprintf("%d|%s", companyID, column))
+}
+
+func (s *PaymentsService) StartWebpayCheckout(ctx context.Context, portalToken string, chargeRefs []string) (*WebpayCheckoutResult, error) {
+	if s.Webpay == nil || strings.TrimSpace(s.Webpay.PublicBaseURL) == "" {
 		return nil, errors.New("FLOWPAY_PAYMENTS_PUBLIC_BASE_URL no configurada")
 	}
 	portalToken = strings.TrimSpace(portalToken)
 	pt, charges, amountCLP, err := s.resolvePortalCheckout(ctx, portalToken, chargeRefs)
+	if err != nil {
+		return nil, err
+	}
+	tbk, err := s.companyWebpayClient(ctx, pt.CompanyID)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +132,7 @@ func (s *PaymentsService) StartWebpayCheckout(ctx context.Context, portalToken s
 		return nil, err
 	}
 
-	createResp, rawCreate, err := s.Webpay.Transbank.Create(ctx, transbank.CreateRequest{
+	createResp, rawCreate, err := tbk.Create(ctx, transbank.CreateRequest{
 		BuyOrder:  buyOrder,
 		SessionID: sessionID,
 		Amount:    amountCLP,
@@ -141,9 +186,6 @@ func (s *PaymentsService) WebpayBridge(ctx context.Context, transactionID int64)
 }
 
 func (s *PaymentsService) CommitWebpayReturn(ctx context.Context, portalToken, tokenWS string) (*WebpayCommitResult, error) {
-	if !s.webpayEnabled() {
-		return nil, domain.ErrWebpayNotConfigured
-	}
 	tokenWS = strings.TrimSpace(tokenWS)
 	if tokenWS == "" {
 		return &WebpayCommitResult{Status: "failed", Message: "falta token_ws"}, nil
@@ -161,7 +203,11 @@ func (s *PaymentsService) CommitWebpayReturn(ctx context.Context, portalToken, t
 		return s.commitResultFromRow(row), nil
 	}
 
-	commitResp, rawCommit, err := s.Webpay.Transbank.Commit(ctx, tokenWS)
+	tbk, err := s.companyWebpayClient(ctx, row.CompanyID)
+	if err != nil {
+		return nil, err
+	}
+	commitResp, rawCommit, err := tbk.Commit(ctx, tokenWS)
 	if err != nil {
 		_ = s.Repo.UpdatePaymentTransactionAfterCommit(ctx, row.ID, "failed", &model.CommitUpdate{
 			TransbankStatus: "commit_error",
@@ -170,7 +216,7 @@ func (s *PaymentsService) CommitWebpayReturn(ctx context.Context, portalToken, t
 		return &WebpayCommitResult{Status: "failed", Message: "no se pudo confirmar con Transbank"}, nil
 	}
 
-	if !s.Webpay.Transbank.Authorized(commitResp) {
+	if !tbk.Authorized(commitResp) {
 		upd := commitUpdateFromResp(commitResp, rawCommit)
 		_ = s.Repo.UpdatePaymentTransactionAfterCommit(ctx, row.ID, "failed", upd)
 		return &WebpayCommitResult{

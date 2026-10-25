@@ -19,7 +19,6 @@ import (
 
 	"github.com/flowpay/flowpay-payments/internal/config"
 	"github.com/flowpay/flowpay-payments/internal/controller"
-	"github.com/flowpay/flowpay-payments/internal/gateway/transbank"
 	"github.com/flowpay/flowpay-payments/internal/middleware"
 	"github.com/flowpay/flowpay-payments/internal/repository"
 	"github.com/flowpay/flowpay-payments/internal/routes"
@@ -41,19 +40,14 @@ func main() {
 	}
 
 	repo := repository.New(db)
-	var tbk *transbank.Client
-	if cfg.TransbankCommerceCode != "" && cfg.TransbankAPIKey != "" {
-		tbk = transbank.NewClient(cfg.TransbankEnvironment, cfg.TransbankCommerceCode, cfg.TransbankAPIKey)
-	}
-
 	svc := &service.PaymentsService{
 		Repo: repo,
 		Webpay: &service.WebpayConfig{
 			PublicBaseURL:   cfg.PublicBaseURL,
 			FrontendBaseURL: cfg.FrontendBaseURL,
 			Environment:     cfg.TransbankEnvironment,
-			Transbank:       tbk,
 		},
+		PaymentKey: cfg.PaymentCredentialsKey,
 	}
 
 	deps := controller.Deps{
@@ -82,7 +76,7 @@ func main() {
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: r}
 	go func() {
-		printStartup(db, cfg, tbk != nil)
+		printStartup(db, cfg, len(cfg.PaymentCredentialsKey) == 32)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
@@ -104,13 +98,12 @@ func printStartup(db *sql.DB, cfg config.Config, webpayOn bool) {
 	log.Printf("║ Health: GET %s/health", cfg.Addr)
 	log.Printf("║ DB: %s", safeDSN(cfg.DSN))
 	if webpayOn {
-		if cfg.PublicBaseURL == "" {
-			log.Println("║ Webpay: WARN — configure FLOWPAY_PAYMENTS_PUBLIC_BASE_URL (ngrok)")
-		} else {
-			log.Println("║ Webpay Plus: activo")
-		}
+		log.Printf("║ Webpay: credencial de cada empresa (%s)", cfg.TransbankEnvironment)
 	} else {
-		log.Println("║ Webpay: desactivado (sin credenciales Transbank)")
+		log.Println("║ Webpay: sin clave de cifrado; el enlace no cobra con tarjeta")
+	}
+	if cfg.PublicBaseURL == "" {
+		log.Println("║ Webpay: WARN — configure FLOWPAY_PAYMENTS_PUBLIC_BASE_URL")
 	}
 	for _, t := range []string{"payment_tokens", "payment_transactions", "charges", "payments"} {
 		if !tableExists(db, t) {
