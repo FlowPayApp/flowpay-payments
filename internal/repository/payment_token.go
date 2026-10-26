@@ -52,6 +52,16 @@ WHERE trim(both from token) = trim(both from $1::text)
 	return n > 0, nil
 }
 
+func (db *DB) MarkPaymentTokenPaidByID(ctx context.Context, id int64) error {
+	_, err := db.sql.ExecContext(ctx, `
+UPDATE payment_tokens
+SET status = 'paid'::payment_token_status
+WHERE id = $1
+  AND status IN ('issued'::payment_token_status, 'viewed'::payment_token_status)
+`, id)
+	return err
+}
+
 func (db *DB) MarkPaymentTokenPaid(ctx context.Context, token string) error {
 	_, err := db.sql.ExecContext(ctx, `
 UPDATE payment_tokens

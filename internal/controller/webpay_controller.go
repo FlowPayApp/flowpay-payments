@@ -16,6 +16,7 @@ type WebpayController struct{ Deps }
 
 type checkoutBody struct {
 	ChargeRefs []string `json:"charge_refs"`
+	Method     string   `json:"method"`
 }
 
 type commitBody struct {
@@ -28,7 +29,15 @@ func (h *WebpayController) Checkout(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
 		return
 	}
-	out, err := h.Svc.StartWebpayCheckout(c.Request.Context(), c.Param("token"), body.ChargeRefs)
+	var (
+		out *service.WebpayCheckoutResult
+		err error
+	)
+	if strings.EqualFold(strings.TrimSpace(body.Method), "khipu") {
+		out, err = h.Svc.StartKhipuCheckout(c.Request.Context(), c.Param("token"), body.ChargeRefs)
+	} else {
+		out, err = h.Svc.StartWebpayCheckout(c.Request.Context(), c.Param("token"), body.ChargeRefs)
+	}
 	if err != nil {
 		writeWebpayError(c, err)
 		return
@@ -111,6 +120,10 @@ func writeWebpayError(c *gin.Context, err error) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrWebpayTxNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	case errors.Is(err, domain.ErrKhipuNotOffered):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case errors.Is(err, domain.ErrKhipuCredential):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	}

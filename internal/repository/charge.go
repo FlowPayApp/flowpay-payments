@@ -66,6 +66,10 @@ func (db *DB) MarkChargePaidManual(ctx context.Context, chargeID int64, amount f
 }
 
 func (db *DB) MarkChargePaidWebpay(ctx context.Context, chargeID int64, amount float64, transactionID int64, gatewayRef string) error {
+	return db.MarkChargePaidGateway(ctx, chargeID, amount, transactionID, "webpay", gatewayRef)
+}
+
+func (db *DB) MarkChargePaidGateway(ctx context.Context, chargeID int64, amount float64, transactionID int64, method, gatewayRef string) error {
 	tx, err := db.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -73,8 +77,8 @@ func (db *DB) MarkChargePaidWebpay(ctx context.Context, chargeID int64, amount f
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO payments (charge_id, amount, transaction_id, method, gateway_reference)
-VALUES ($1, $2, $3, 'webpay', NULLIF($4, ''))
-`, chargeID, amount, transactionID, gatewayRef); err != nil {
+VALUES ($1, $2, $3, $4, NULLIF($5, ''))
+`, chargeID, amount, transactionID, method, gatewayRef); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE charges SET paid_at = CURRENT_TIMESTAMP WHERE id = $1 AND paid_at IS NULL`, chargeID); err != nil {

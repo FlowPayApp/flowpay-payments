@@ -31,6 +31,7 @@ type WebpayCommitResult struct {
 	AuthorizationCode string  `json:"authorization_code,omitempty"`
 	Amount            float64 `json:"amount,omitempty"`
 	Message           string  `json:"message,omitempty"`
+	Method            string  `json:"method,omitempty"`
 }
 
 func (s *PaymentsService) companyWebpayClient(ctx context.Context, companyID int64) (*transbank.Client, error) {
@@ -266,6 +267,9 @@ func (s *PaymentsService) FrontendReturnURL(portalToken string, result *WebpayCo
 		}
 		if result.Message != "" {
 			q.Set("message", result.Message)
+		}
+		if result.Method != "" {
+			q.Set("medio", result.Method)
 		}
 	}
 	return base + "/pay/" + url.PathEscape(strings.TrimSpace(portalToken)) + "/return?" + q.Encode()

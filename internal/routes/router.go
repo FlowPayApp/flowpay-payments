@@ -10,15 +10,19 @@ import (
 func Register(r *gin.Engine, deps controller.Deps, jwtMiddleware gin.HandlerFunc) {
 	portal := controller.PortalController{Deps: deps}
 	webpay := controller.WebpayController{Deps: deps}
+	khipu := controller.KhipuController{Deps: deps}
 	tokens := controller.PaymentTokenController{Deps: deps}
 	payments := controller.PaymentController{Deps: deps}
 
 	r.GET("/api/public/pay/:token", portal.GetPortal)
 	r.POST("/api/public/pay/:token/checkout", webpay.Checkout)
 	r.POST("/api/public/pay/:token/commit", webpay.Commit)
+	r.GET("/api/public/pay/:token/khipu/status", khipu.Status)
 	r.GET("/api/public/webpay/return/:token", webpay.Return)
 	r.POST("/api/public/webpay/return/:token", webpay.Return)
 	r.GET("/api/public/webpay/bridge/:id", webpay.Bridge)
+	r.GET("/api/public/khipu/return/:token", khipu.Return)
+	r.POST("/api/public/khipu/notify", khipu.Notify)
 
 	api := r.Group("/api")
 	api.Use(jwtMiddleware)
