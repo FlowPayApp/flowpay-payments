@@ -90,6 +90,35 @@ func (db *DB) GetPaymentTransactionByWebpayToken(ctx context.Context, token stri
 	return db.scanPaymentTransaction(db.sql.QueryRowContext(ctx, paymentTransactionSelect+` WHERE webpay_token = $1`, token))
 }
 
+func (db *DB) GetPaymentTransactionByBuyOrder(ctx context.Context, buyOrder string) (*model.PaymentTransaction, error) {
+	return db.scanPaymentTransaction(db.sql.QueryRowContext(ctx, paymentTransactionSelect+` WHERE buy_order = $1`, buyOrder))
+}
+
+// AuthorizePaymentTransaction marca la fila una sola vez. claimed es falso si ya estaba autorizada.
+func (db *DB) AuthorizePaymentTransaction(ctx context.Context, id int64, resp *model.CommitUpdate) (bool, error) {
+	res, err := db.sql.ExecContext(ctx, `
+UPDATE payment_transactions
+SET status = 'authorized'::payment_tx_status,
+    authorization_code = $2,
+    payment_type_code = $3,
+    transbank_status = $4,
+    raw_commit = $5::jsonb,
+    committed_at = NOW(),
+    updated_at = NOW()
+WHERE id = $1 AND status <> 'authorized'::payment_tx_status
+`, id,
+		nullStringVal(resp.AuthorizationCode), nullStringVal(resp.PaymentTypeCode),
+		nullStringVal(resp.TransbankStatus), nullableJSON(resp.RawCommit))
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 func (db *DB) ListPaymentTransactionCharges(ctx context.Context, transactionID int64) ([]model.PaymentTransactionCharge, error) {
 	rows, err := db.sql.QueryContext(ctx, `
 SELECT transaction_id, charge_id, amount

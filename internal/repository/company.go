@@ -70,3 +70,27 @@ WHERE company_id = $1
 	}
 	return code.String, key.String, true, nil
 }
+
+// CompanyKhipuSealed devuelve la API key cifrada. ok es falso si falta.
+func (db *DB) CompanyKhipuSealed(ctx context.Context, companyID int64) (apiKey string, ok bool, err error) {
+	var key sql.NullString
+	err = db.sql.QueryRowContext(ctx, `
+SELECT khipu_api_key
+FROM company_payment_credentials
+WHERE company_id = $1
+`, companyID).Scan(&key)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "42P01" {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if !key.Valid || strings.TrimSpace(key.String) == "" {
+		return "", false, nil
+	}
+	return key.String, true, nil
+}
