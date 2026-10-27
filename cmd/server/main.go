@@ -49,6 +49,9 @@ func main() {
 	}
 
 	repo := repository.New(db)
+	if err := repo.EnsureFintocColumns(context.Background()); err != nil {
+		log.Printf("warn: columnas de Fintoc: %v", err)
+	}
 	svc := &service.PaymentsService{
 		Repo: repo,
 		Webpay: &service.WebpayConfig{
@@ -121,7 +124,7 @@ func printStartup(db *sql.DB, cfg config.Config, webpayOn bool) {
 		log.Println("║ Webpay: sin clave de cifrado; el enlace no cobra con tarjeta")
 	}
 	if cfg.PublicBaseURL == "" {
-		log.Println("║ Webpay y Khipu: WARN — configure FLOWPAY_PAYMENTS_PUBLIC_BASE_URL")
+		log.Println("║ Webpay, Khipu y Fintoc: WARN — configure FLOWPAY_PAYMENTS_PUBLIC_BASE_URL")
 	}
 	for _, t := range []string{"payment_tokens", "payment_transactions", "charges", "payments"} {
 		if !tableExists(db, t) {
