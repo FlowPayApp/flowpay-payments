@@ -33,9 +33,12 @@ func (h *WebpayController) Checkout(c *gin.Context) {
 		out *service.WebpayCheckoutResult
 		err error
 	)
-	if strings.EqualFold(strings.TrimSpace(body.Method), "khipu") {
+	switch strings.ToLower(strings.TrimSpace(body.Method)) {
+	case "khipu":
 		out, err = h.Svc.StartKhipuCheckout(c.Request.Context(), c.Param("token"), body.ChargeRefs)
-	} else {
+	case "fintoc":
+		out, err = h.Svc.StartFintocCheckout(c.Request.Context(), c.Param("token"), body.ChargeRefs)
+	default:
 		out, err = h.Svc.StartWebpayCheckout(c.Request.Context(), c.Param("token"), body.ChargeRefs)
 	}
 	if err != nil {
@@ -123,6 +126,10 @@ func writeWebpayError(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrKhipuNotOffered):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrKhipuCredential):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+	case errors.Is(err, domain.ErrFintocNotOffered):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case errors.Is(err, domain.ErrFintocCredential):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

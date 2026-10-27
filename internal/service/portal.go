@@ -90,7 +90,7 @@ func (s *PaymentsService) ResolvePaymentPortal(ctx context.Context, tokenValue s
 	if err != nil {
 		return nil, err
 	}
-	webpayOn, khipuOn, fintocOn, err := s.Repo.CompanyPaymentMethods(ctx, row.CompanyID)
+	webpayOn, khipuOn, fintocOn, _, err := s.Repo.CompanyPaymentMethods(ctx, row.CompanyID)
 	if err != nil {
 		return nil, err
 	}

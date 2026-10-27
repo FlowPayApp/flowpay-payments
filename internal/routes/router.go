@@ -11,6 +11,7 @@ func Register(r *gin.Engine, deps controller.Deps, jwtMiddleware gin.HandlerFunc
 	portal := controller.PortalController{Deps: deps}
 	webpay := controller.WebpayController{Deps: deps}
 	khipu := controller.KhipuController{Deps: deps}
+	fintocPay := controller.FintocController{Deps: deps}
 	tokens := controller.PaymentTokenController{Deps: deps}
 	payments := controller.PaymentController{Deps: deps}
 
@@ -23,6 +24,9 @@ func Register(r *gin.Engine, deps controller.Deps, jwtMiddleware gin.HandlerFunc
 	r.GET("/api/public/webpay/bridge/:id", webpay.Bridge)
 	r.GET("/api/public/khipu/return/:token", khipu.Return)
 	r.POST("/api/public/khipu/notify", khipu.Notify)
+	r.GET("/api/public/pay/:token/fintoc/status", fintocPay.Status)
+	r.GET("/api/public/fintoc/return/:token", fintocPay.Return)
+	r.POST("/api/public/fintoc/notify", fintocPay.Notify)
 
 	api := r.Group("/api")
 	api.Use(jwtMiddleware)

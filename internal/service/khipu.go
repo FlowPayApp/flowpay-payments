@@ -16,8 +16,6 @@ import (
 	"github.com/flowpay/flowpay-payments/internal/secretbox"
 )
 
-const khipuGateway = "khipu"
-
 func (s *PaymentsService) companyKhipuClient(ctx context.Context, companyID int64) (*khipu.Client, error) {
 	sealed, ok, err := s.Repo.CompanyKhipuSealed(ctx, companyID)
 	if err != nil {
@@ -55,6 +53,9 @@ func (s *PaymentsService) StartKhipuCheckout(ctx context.Context, portalToken st
 	portalToken = strings.TrimSpace(portalToken)
 	pt, charges, amountCLP, err := s.resolvePortalCheckout(ctx, portalToken, chargeRefs)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.requireTransfer(ctx, pt.CompanyID, khipuGateway); err != nil {
 		return nil, err
 	}
 	client, err := s.companyKhipuClient(ctx, pt.CompanyID)
