@@ -15,6 +15,19 @@ import (
 
 type KhipuController struct{ Deps }
 
+type khipuNotifyBody struct {
+	PaymentID string `json:"payment_id"`
+}
+
+// @Summary Retorno desde Khipu
+// @Description Redirige al front con el resultado. cancel=1 lo marca como cancelado; si Khipu aún no confirma, queda pendiente.
+// @Tags Khipu
+// @Param token path string true "Token del portal de pago"
+// @Param orden query string true "Orden de compra (buy_order)"
+// @Param cancel query string false "1 si el cliente canceló"
+// @Success 302 "Redirección al front"
+// @Failure 404 {object} errorResponse
+// @Router /api/public/khipu/return/{token} [get]
 func (h *KhipuController) Return(c *gin.Context) {
 	portalToken := c.Param("token")
 	if strings.TrimSpace(c.Query("cancel")) == "1" {
@@ -43,6 +56,18 @@ func (h *KhipuController) Return(c *gin.Context) {
 	c.Redirect(http.StatusFound, h.Svc.FrontendReturnURL(portalToken, out))
 }
 
+// @Summary Estado de pago Khipu
+// @Description Consulta a Khipu y sincroniza el estado de la transacción.
+// @Tags Khipu
+// @Produce json
+// @Param token path string true "Token del portal de pago"
+// @Param orden query string true "Orden de compra (buy_order)"
+// @Success 200 {object} service.WebpayCommitResult
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 409 {object} errorResponse
+// @Failure 503 {object} errorResponse
+// @Router /api/public/pay/{token}/khipu/status [get]
 func (h *KhipuController) Status(c *gin.Context) {
 	out, err := h.Svc.SyncKhipuReturn(c.Request.Context(), c.Param("token"), c.Query("orden"))
 	if err != nil {
@@ -52,6 +77,14 @@ func (h *KhipuController) Status(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
+// @Summary Notificación de Khipu
+// @Description Webhook de Khipu. Responde 503 para que Khipu reintente mientras el pago sigue pendiente.
+// @Tags Webhooks
+// @Accept json
+// @Param body body khipuNotifyBody true "Aviso de Khipu"
+// @Success 200
+// @Failure 503
+// @Router /api/public/khipu/notify [post]
 func (h *KhipuController) Notify(c *gin.Context) {
 	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, 1<<16))
 	if err != nil {
@@ -79,9 +112,7 @@ func (h *KhipuController) Notify(c *gin.Context) {
 }
 
 func khipuPaymentID(raw []byte) string {
-	var payload struct {
-		PaymentID string `json:"payment_id"`
-	}
+	var payload khipuNotifyBody
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return ""
 	}

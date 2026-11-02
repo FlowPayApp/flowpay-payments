@@ -13,6 +13,18 @@ type createPaymentTokenBody struct {
 	CompanyID int64 `json:"company_id"`
 }
 
+// @Summary Crear token de portal de pago
+// @Description Genera el enlace de pago de un cliente. company_id es opcional y, si viene, debe coincidir con el del JWT.
+// @Tags Interno
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body createPaymentTokenBody true "Cliente"
+// @Success 201 {object} model.PaymentToken
+// @Failure 400 {object} errorResponse
+// @Failure 403 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Router /api/payment-tokens [post]
 func (h *PaymentTokenController) Create(c *gin.Context) {
 	var body createPaymentTokenBody
 	if err := c.ShouldBindJSON(&body); err != nil {

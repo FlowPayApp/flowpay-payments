@@ -35,7 +35,14 @@ func Register(r *gin.Engine, deps controller.Deps, jwtMiddleware gin.HandlerFunc
 		api.POST("/payments", payments.RecordManual)
 	}
 
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "flowpay-payments"})
-	})
+	r.GET("/health", health)
+}
+
+// @Summary Estado del servicio
+// @Tags Salud
+// @Produce json
+// @Success 200 {object} map[string]string
+// @Router /health [get]
+func health(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "flowpay-payments"})
 }

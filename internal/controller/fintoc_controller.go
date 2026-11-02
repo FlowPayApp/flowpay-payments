@@ -15,6 +15,17 @@ import (
 
 type FintocController struct{ Deps }
 
+// @Summary Retorno desde Fintoc
+// @Description Redirige al front con el resultado. cancel=1 lo marca como cancelado.
+// @Tags Fintoc
+// @Param token path string true "Token del portal de pago"
+// @Param orden query string true "Orden de compra (buy_order)"
+// @Param cancel query string false "1 si el cliente canceló"
+// @Success 302 "Redirección al front"
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 503 {object} errorResponse
+// @Router /api/public/fintoc/return/{token} [get]
 func (h *FintocController) Return(c *gin.Context) {
 	portalToken := c.Param("token")
 	buyOrder := strings.TrimSpace(c.Query("orden"))
@@ -35,6 +46,16 @@ func (h *FintocController) Return(c *gin.Context) {
 	c.Redirect(http.StatusFound, h.Svc.FrontendReturnURL(portalToken, out))
 }
 
+// @Summary Estado de pago Fintoc
+// @Tags Fintoc
+// @Produce json
+// @Param token path string true "Token del portal de pago"
+// @Param orden query string true "Orden de compra (buy_order)"
+// @Success 200 {object} service.WebpayCommitResult
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 503 {object} errorResponse
+// @Router /api/public/pay/{token}/fintoc/status [get]
 func (h *FintocController) Status(c *gin.Context) {
 	out, err := h.Svc.ReadFintocStatus(c.Request.Context(), c.Param("token"), c.Query("orden"))
 	if err != nil {
@@ -44,6 +65,16 @@ func (h *FintocController) Status(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
+// @Summary Notificación de Fintoc
+// @Description Webhook de Fintoc firmado con Fintoc-Signature. Avisos que no corresponden a un cobro se aceptan con 200 y se ignoran.
+// @Tags Webhooks
+// @Accept json
+// @Param Fintoc-Signature header string true "Firma del webhook"
+// @Param body body object true "Evento de Fintoc"
+// @Success 200
+// @Failure 400
+// @Failure 503
+// @Router /api/public/fintoc/notify [post]
 func (h *FintocController) Notify(c *gin.Context) {
 	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, 1<<16))
 	if err != nil {

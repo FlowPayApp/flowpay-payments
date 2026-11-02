@@ -23,6 +23,18 @@ type commitBody struct {
 	TokenWS string `json:"token_ws"`
 }
 
+// @Summary Iniciar pago
+// @Description method elige la pasarela: webpay (por defecto), khipu o fintoc. Devuelve la URL a la que hay que redirigir al cliente.
+// @Tags Portal
+// @Accept json
+// @Produce json
+// @Param token path string true "Token del portal de pago"
+// @Param body body checkoutBody true "Cobros a pagar y medio de pago"
+// @Success 200 {object} service.WebpayCheckoutResult
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 503 {object} errorResponse
+// @Router /api/public/pay/{token}/checkout [post]
 func (h *WebpayController) Checkout(c *gin.Context) {
 	var body checkoutBody
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -48,6 +60,19 @@ func (h *WebpayController) Checkout(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
+// @Summary Confirmar pago Webpay
+// @Description Confirma la transacción en Transbank (commit). token_ws va en el body o, si falta, en la query.
+// @Tags Webpay
+// @Accept json
+// @Produce json
+// @Param token path string true "Token del portal de pago"
+// @Param body body commitBody true "Token de Webpay"
+// @Param token_ws query string false "Token de Webpay (alternativa al body)"
+// @Success 200 {object} service.WebpayCommitResult
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 503 {object} errorResponse
+// @Router /api/public/pay/{token}/commit [post]
 func (h *WebpayController) Commit(c *gin.Context) {
 	var body commitBody
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -66,6 +91,18 @@ func (h *WebpayController) Commit(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
+// @Summary Retorno desde Webpay
+// @Description return_url que llama Transbank. Confirma el pago y redirige al front con el resultado. Sin token_ws (pago anulado) redirige como fallido.
+// @Tags Webpay
+// @Param token path string true "Token del portal de pago"
+// @Param token_ws query string false "Token de Webpay"
+// @Param TBK_TOKEN query string false "Token cuando el cliente anula el pago"
+// @Success 302 "Redirección al front"
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 503 {object} errorResponse
+// @Router /api/public/webpay/return/{token} [get]
+// @Router /api/public/webpay/return/{token} [post]
 func (h *WebpayController) Return(c *gin.Context) {
 	portalToken := c.Param("token")
 	tokenWS := strings.TrimSpace(c.Query("token_ws"))
@@ -88,6 +125,14 @@ func (h *WebpayController) Return(c *gin.Context) {
 	c.Redirect(http.StatusFound, h.Svc.FrontendReturnURL(portalToken, out))
 }
 
+// @Summary Puente hacia Webpay
+// @Description Página HTML que envía por POST el token_ws al formulario de Transbank.
+// @Tags Webpay
+// @Produce html
+// @Param id path int true "ID de la transacción"
+// @Success 200 {string} string "Página HTML"
+// @Failure 400 {string} string
+// @Router /api/public/webpay/bridge/{id} [get]
 func (h *WebpayController) Bridge(c *gin.Context) {
 	var txID int64
 	if _, err := fmt.Sscanf(c.Param("id"), "%d", &txID); err != nil || txID <= 0 {
