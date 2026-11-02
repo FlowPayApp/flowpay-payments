@@ -123,6 +123,7 @@ func (s *PaymentsService) StartKhipuCheckout(ctx context.Context, portalToken st
 	created, rawCreate, err := client.Create(ctx, createReq)
 	if err != nil {
 		_ = s.Repo.FailPaymentTransaction(ctx, txID, "create_error", rawCreate)
+		s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, pt.CompanyID, txID, "payer", "No se pudo iniciar el pago con Khipu", "khipu_create", audit.Cause(err), map[string]any{"gateway": khipuGateway, "buy_order": buyOrder, "amount": amountCLP})
 		return nil, fmt.Errorf("khipu create: %w", err)
 	}
 	if err := s.Repo.UpdatePaymentTransactionWebpayCreate(ctx, txID, created.PaymentID, created.PaymentURL, "redirected", rawCreate); err != nil {
@@ -186,14 +187,7 @@ func (s *PaymentsService) noteUnknownKhipu(ctx context.Context, paymentID string
 	if len(paymentID) > 40 {
 		paymentID = paymentID[:40]
 	}
-	s.record(ctx, audit.Event{
-		Domain:    audit.DomainPayment,
-		Action:    audit.ActionWebhookRejected,
-		Outcome:   audit.OutcomeDenied,
-		ActorRole: "webhook",
-		Summary:   "Aviso de Khipu sin un pago nuestro",
-		Meta:      map[string]any{"gateway": khipuGateway, "reason": "unknown", "payment_id": paymentID},
-	})
+	s.noteGateway(ctx, audit.ActionWebhookRejected, audit.OutcomeDenied, 0, 0, "webhook", "Aviso de Khipu sin un pago nuestro", "khipu_unknown", "no corresponde a un pago de GeldFlus", map[string]any{"gateway": khipuGateway, "payment_id": paymentID})
 }
 
 // NotifyKhipu confirma un aviso de conciliación. ErrKhipuPending pide que Khipu reintente.
@@ -286,17 +280,7 @@ func (s *PaymentsService) applyKhipuPayment(ctx context.Context, portalToken str
 	if payment == nil || !payment.Reconciled() {
 		if payment != nil && payment.Terminal() {
 			_ = s.Repo.FailPaymentTransaction(ctx, row.ID, clipStatus(payment.Status), raw)
-			s.record(ctx, audit.Event{
-				Domain:     audit.DomainPayment,
-				Action:     audit.ActionPaymentFailed,
-				Outcome:    audit.OutcomeFailure,
-				ActorRole:  "payer",
-				CompanyID:  row.CompanyID,
-				TargetType: audit.TargetPayment,
-				TargetID:   audit.ID(row.ID),
-				Summary:    "La transferencia Khipu no se completó",
-				Meta:       map[string]any{"gateway": khipuGateway, "buy_order": row.BuyOrder, "amount": row.Amount},
-			})
+			s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, row.CompanyID, row.ID, "payer", "La transferencia Khipu no se completó", "khipu_failed", gatewayStatusPhrase(payment.Status), map[string]any{"gateway": khipuGateway, "buy_order": row.BuyOrder, "amount": row.Amount, "status": clipStatus(payment.Status)})
 			return &WebpayCommitResult{
 				Status:   "failed",
 				BuyOrder: row.BuyOrder,
@@ -314,12 +298,15 @@ func (s *PaymentsService) applyKhipuPayment(ctx context.Context, portalToken str
 		}, domain.ErrKhipuPending
 	}
 	if row.WebpayToken.Valid && payment.PaymentID != "" && payment.PaymentID != row.WebpayToken.String {
+		s.noteKhipuMismatch(ctx, row, "el identificador no coincide")
 		return nil, domain.ErrKhipuMismatch
 	}
 	if payment.TransactionID != "" && payment.TransactionID != row.BuyOrder {
+		s.noteKhipuMismatch(ctx, row, "la orden no coincide")
 		return nil, domain.ErrKhipuMismatch
 	}
 	if !strings.EqualFold(strings.TrimSpace(payment.Currency), "CLP") || int64(math.Round(float64(payment.Amount))) != int64(math.Round(row.Amount)) {
+		s.noteKhipuMismatch(ctx, row, "el monto o la moneda no coinciden")
 		return nil, domain.ErrKhipuMismatch
 	}
 
@@ -337,16 +324,19 @@ func (s *PaymentsService) applyKhipuPayment(ctx context.Context, portalToken str
 		RawCommit:         raw,
 	})
 	if err != nil {
+		s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, row.CompanyID, row.ID, "payer", "No se pudo registrar la transferencia Khipu", "khipu_store", "no se pudo guardar la confirmación", map[string]any{"gateway": khipuGateway, "buy_order": row.BuyOrder, "amount": row.Amount})
 		return nil, err
 	}
 	if claimed {
 		charges, err := s.Repo.ListPaymentTransactionCharges(ctx, row.ID)
 		if err != nil {
+			s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, row.CompanyID, row.ID, "payer", "No se pudo registrar la transferencia Khipu", "khipu_store", "no se pudieron leer los cobros del pago", map[string]any{"gateway": khipuGateway, "buy_order": row.BuyOrder, "amount": row.Amount})
 			return nil, err
 		}
 		ref := strings.TrimSpace(payment.PaymentID)
 		for _, link := range charges {
 			if err := s.Repo.MarkChargePaidGateway(ctx, link.ChargeID, link.Amount, row.ID, khipuGateway, ref); err != nil {
+				s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, row.CompanyID, row.ID, "payer", "No se pudo registrar la transferencia Khipu", "khipu_store", "no se pudo marcar el cobro como pagado", map[string]any{"gateway": khipuGateway, "buy_order": row.BuyOrder, "amount": row.Amount})
 				return nil, err
 			}
 		}
@@ -388,6 +378,13 @@ func khipuNotifyURL(publicBase string) string {
 		return ""
 	}
 	return strings.TrimSuffix(publicBase, "/") + "/api/public/khipu/notify"
+}
+
+func (s *PaymentsService) noteKhipuMismatch(ctx context.Context, row *model.PaymentTransaction, reason string) {
+	if row == nil || !audit.Once("khipu-mismatch:"+audit.ID(row.ID)+":"+reason, 10*time.Minute) {
+		return
+	}
+	s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeDenied, row.CompanyID, row.ID, "webhook", "El aviso de Khipu no coincide con el cobro", "khipu_mismatch", reason, map[string]any{"gateway": khipuGateway, "buy_order": row.BuyOrder, "amount": row.Amount})
 }
 
 func clipStatus(status string) string {

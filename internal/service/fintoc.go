@@ -113,6 +113,7 @@ func (s *PaymentsService) StartFintocCheckout(ctx context.Context, portalToken s
 	})
 	if err != nil {
 		_ = s.Repo.FailPaymentTransaction(ctx, txID, "create_error", rawCreate)
+		s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, pt.CompanyID, txID, "payer", "No se pudo iniciar el pago con Fintoc", "fintoc_create", audit.Cause(err), map[string]any{"gateway": fintocGateway, "buy_order": buyOrder, "amount": amountCLP})
 		return nil, fmt.Errorf("fintoc create: %w", err)
 	}
 	if err := s.Repo.UpdatePaymentTransactionWebpayCreate(ctx, txID, created.ID, created.RedirectURL, "redirected", rawCreate); err != nil {
@@ -162,17 +163,7 @@ func (s *PaymentsService) NotifyFintoc(ctx context.Context, signature string, ra
 		return err
 	}
 	if strings.TrimSpace(webhookSecret) == "" || !fintoc.VerifySignature(signature, webhookSecret, raw, now) {
-		s.record(ctx, audit.Event{
-			Domain:     audit.DomainPayment,
-			Action:     audit.ActionWebhookRejected,
-			Outcome:    audit.OutcomeDenied,
-			ActorRole:  "webhook",
-			CompanyID:  row.CompanyID,
-			TargetType: audit.TargetPayment,
-			TargetID:   audit.ID(row.ID),
-			Summary:    "Webhook de Fintoc rechazado",
-			Meta:       map[string]any{"gateway": fintocGateway, "reason": "firma"},
-		})
+		s.noteGateway(ctx, audit.ActionWebhookRejected, audit.OutcomeDenied, row.CompanyID, row.ID, "webhook", "Webhook de Fintoc rechazado", "fintoc_signature", "la firma no es válida", map[string]any{"gateway": fintocGateway})
 		return domain.ErrFintocSignature
 	}
 	if decision.Action == "ignore" {
@@ -237,33 +228,31 @@ func (s *PaymentsService) applyFintocDecision(ctx context.Context, row *model.Pa
 		return nil
 	}
 	if decision.Action == "mismatch" {
+		reason := strings.TrimSpace(decision.Reason)
+		if reason == "" {
+			reason = "el aviso no coincide con el cobro"
+		}
+		s.noteFintocMismatch(ctx, row, reason)
 		return domain.ErrFintocMismatch
 	}
 	if decision.Action == "fail" {
 		_ = s.Repo.FailPaymentTransaction(ctx, row.ID, "failed", raw)
-		s.record(ctx, audit.Event{
-			Domain:     audit.DomainPayment,
-			Action:     audit.ActionPaymentFailed,
-			Outcome:    audit.OutcomeFailure,
-			ActorRole:  "webhook",
-			CompanyID:  row.CompanyID,
-			TargetType: audit.TargetPayment,
-			TargetID:   audit.ID(row.ID),
-			Summary:    "La transferencia Fintoc no se completó",
-			Meta:       map[string]any{"gateway": fintocGateway, "buy_order": row.BuyOrder, "amount": row.Amount},
-		})
+		s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, row.CompanyID, row.ID, "webhook", "La transferencia Fintoc no se completó", "fintoc_failed", gatewayStatusPhrase(decision.Status), map[string]any{"gateway": fintocGateway, "buy_order": row.BuyOrder, "amount": row.Amount, "status": decision.Status})
 		return nil
 	}
 	if decision.Action != "pay" {
 		return nil
 	}
 	if decision.SessionID != "" && row.WebpayToken.Valid && decision.SessionID != row.WebpayToken.String {
+		s.noteFintocMismatch(ctx, row, "la sesión no coincide")
 		return domain.ErrFintocMismatch
 	}
 	if decision.BuyOrder != "" && decision.BuyOrder != row.BuyOrder {
+		s.noteFintocMismatch(ctx, row, "la orden no coincide")
 		return domain.ErrFintocMismatch
 	}
 	if !strings.EqualFold(strings.TrimSpace(decision.Currency), "CLP") || decision.Amount != int64(math.Round(row.Amount)) {
+		s.noteFintocMismatch(ctx, row, "el monto o la moneda no coinciden")
 		return domain.ErrFintocMismatch
 	}
 	code := strings.TrimSpace(decision.PaymentID)
@@ -280,6 +269,7 @@ func (s *PaymentsService) applyFintocDecision(ctx context.Context, row *model.Pa
 		RawCommit:         raw,
 	})
 	if err != nil {
+		s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, row.CompanyID, row.ID, "webhook", "No se pudo registrar la transferencia Fintoc", "fintoc_store", "no se pudo guardar la confirmación", map[string]any{"gateway": fintocGateway, "buy_order": row.BuyOrder, "amount": row.Amount})
 		return err
 	}
 	if !claimed {
@@ -287,6 +277,7 @@ func (s *PaymentsService) applyFintocDecision(ctx context.Context, row *model.Pa
 	}
 	charges, err := s.Repo.ListPaymentTransactionCharges(ctx, row.ID)
 	if err != nil {
+		s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, row.CompanyID, row.ID, "webhook", "No se pudo registrar la transferencia Fintoc", "fintoc_store", "no se pudieron leer los cobros del pago", map[string]any{"gateway": fintocGateway, "buy_order": row.BuyOrder, "amount": row.Amount})
 		return err
 	}
 	ref := strings.TrimSpace(decision.PaymentID)
@@ -295,6 +286,7 @@ func (s *PaymentsService) applyFintocDecision(ctx context.Context, row *model.Pa
 	}
 	for _, link := range charges {
 		if err := s.Repo.MarkChargePaidGateway(ctx, link.ChargeID, link.Amount, row.ID, fintocGateway, ref); err != nil {
+			s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, row.CompanyID, row.ID, "webhook", "No se pudo registrar la transferencia Fintoc", "fintoc_store", "no se pudo marcar el cobro como pagado", map[string]any{"gateway": fintocGateway, "buy_order": row.BuyOrder, "amount": row.Amount})
 			return err
 		}
 	}
@@ -312,6 +304,13 @@ func (s *PaymentsService) applyFintocDecision(ctx context.Context, row *model.Pa
 		Meta:       map[string]any{"gateway": fintocGateway, "buy_order": row.BuyOrder, "amount": row.Amount},
 	})
 	return nil
+}
+
+func (s *PaymentsService) noteFintocMismatch(ctx context.Context, row *model.PaymentTransaction, reason string) {
+	if row == nil || !audit.Once("fintoc-mismatch:"+audit.ID(row.ID)+":"+reason, 10*time.Minute) {
+		return
+	}
+	s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeDenied, row.CompanyID, row.ID, "webhook", "El aviso de Fintoc no coincide con el cobro", "fintoc_mismatch", reason, map[string]any{"gateway": fintocGateway, "buy_order": row.BuyOrder, "amount": row.Amount})
 }
 
 func fintocResultFromRow(row *model.PaymentTransaction) *WebpayCommitResult {
