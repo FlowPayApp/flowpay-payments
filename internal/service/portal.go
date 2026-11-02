@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flowpay/flowpay-payments/internal/audit"
 	"github.com/flowpay/flowpay-payments/internal/domain"
 	"github.com/flowpay/flowpay-payments/internal/model"
 )
@@ -72,6 +73,16 @@ func (s *PaymentsService) ResolvePaymentPortal(ctx context.Context, tokenValue s
 	if row.Status == model.PaymentTokenStatusIssued {
 		if changed, mErr := s.Repo.MarkPaymentTokenViewed(ctx, row.Token); mErr == nil && changed {
 			row.Status = model.PaymentTokenStatusViewed
+			s.record(ctx, audit.Event{
+				Domain:     audit.DomainPayment,
+				Action:     audit.ActionLinkOpened,
+				ActorRole:  "payer",
+				CompanyID:  row.CompanyID,
+				TargetType: audit.TargetClient,
+				TargetID:   audit.ID(row.ClientID),
+				Summary:    "El deudor abrió el enlace de pago",
+				Meta:       map[string]any{"token_id": row.ID},
+			})
 		}
 	}
 	cm, err := s.Repo.GetCompanyMessaging(ctx, row.CompanyID)

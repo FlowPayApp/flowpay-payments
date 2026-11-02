@@ -9,7 +9,9 @@ import (
 	"math"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/flowpay/flowpay-payments/internal/audit"
 	"github.com/flowpay/flowpay-payments/internal/domain"
 	"github.com/flowpay/flowpay-payments/internal/gateway/khipu"
 	"github.com/flowpay/flowpay-payments/internal/model"
@@ -126,6 +128,16 @@ func (s *PaymentsService) StartKhipuCheckout(ctx context.Context, portalToken st
 	if err := s.Repo.UpdatePaymentTransactionWebpayCreate(ctx, txID, created.PaymentID, created.PaymentURL, "redirected", rawCreate); err != nil {
 		return nil, err
 	}
+	s.record(ctx, audit.Event{
+		Domain:     audit.DomainPayment,
+		Action:     audit.ActionCheckoutStarted,
+		ActorRole:  "payer",
+		CompanyID:  pt.CompanyID,
+		TargetType: audit.TargetPayment,
+		TargetID:   audit.ID(txID),
+		Summary:    "Se inició un pago con Khipu",
+		Meta:       map[string]any{"gateway": khipuGateway, "buy_order": buyOrder, "amount": amountCLP, "charge_ids": chargeIDs(charges)},
+	})
 	return &WebpayCheckoutResult{
 		RedirectURL: created.PaymentURL,
 		BuyOrder:    buyOrder,
@@ -162,6 +174,28 @@ func (s *PaymentsService) SyncKhipuReturn(ctx context.Context, portalToken, buyO
 	return out, err
 }
 
+func (s *PaymentsService) noteUnknownKhipu(ctx context.Context, paymentID string) {
+	stamped := audit.Finish(ctx, audit.Event{})
+	ip := stamped.IP
+	if ip == "" {
+		ip = "unknown"
+	}
+	if !audit.Once("khipu-unknown:"+ip, 10*time.Minute) {
+		return
+	}
+	if len(paymentID) > 40 {
+		paymentID = paymentID[:40]
+	}
+	s.record(ctx, audit.Event{
+		Domain:    audit.DomainPayment,
+		Action:    audit.ActionWebhookRejected,
+		Outcome:   audit.OutcomeDenied,
+		ActorRole: "webhook",
+		Summary:   "Aviso de Khipu sin un pago nuestro",
+		Meta:      map[string]any{"gateway": khipuGateway, "reason": "unknown", "payment_id": paymentID},
+	})
+}
+
 // NotifyKhipu confirma un aviso de conciliación. ErrKhipuPending pide que Khipu reintente.
 func (s *PaymentsService) NotifyKhipu(ctx context.Context, paymentID string) error {
 	paymentID = strings.TrimSpace(paymentID)
@@ -171,16 +205,28 @@ func (s *PaymentsService) NotifyKhipu(ctx context.Context, paymentID string) err
 	row, err := s.Repo.GetPaymentTransactionByWebpayToken(ctx, paymentID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			s.noteUnknownKhipu(ctx, paymentID)
 			return domain.ErrWebpayTxNotFound
 		}
 		return err
 	}
 	if row.Gateway != khipuGateway {
+		s.noteUnknownKhipu(ctx, paymentID)
 		return domain.ErrWebpayTxNotFound
 	}
 	if row.Status == "authorized" {
 		return nil
 	}
+	s.record(ctx, audit.Event{
+		Domain:     audit.DomainPayment,
+		Action:     audit.ActionWebhookAccepted,
+		ActorRole:  "webhook",
+		CompanyID:  row.CompanyID,
+		TargetType: audit.TargetPayment,
+		TargetID:   audit.ID(row.ID),
+		Summary:    "Webhook de Khipu aceptado",
+		Meta:       map[string]any{"gateway": khipuGateway, "buy_order": row.BuyOrder},
+	})
 	client, err := s.companyKhipuClient(ctx, row.CompanyID)
 	if err != nil {
 		return err
@@ -240,6 +286,17 @@ func (s *PaymentsService) applyKhipuPayment(ctx context.Context, portalToken str
 	if payment == nil || !payment.Reconciled() {
 		if payment != nil && payment.Terminal() {
 			_ = s.Repo.FailPaymentTransaction(ctx, row.ID, clipStatus(payment.Status), raw)
+			s.record(ctx, audit.Event{
+				Domain:     audit.DomainPayment,
+				Action:     audit.ActionPaymentFailed,
+				Outcome:    audit.OutcomeFailure,
+				ActorRole:  "payer",
+				CompanyID:  row.CompanyID,
+				TargetType: audit.TargetPayment,
+				TargetID:   audit.ID(row.ID),
+				Summary:    "La transferencia Khipu no se completó",
+				Meta:       map[string]any{"gateway": khipuGateway, "buy_order": row.BuyOrder, "amount": row.Amount},
+			})
 			return &WebpayCommitResult{
 				Status:   "failed",
 				BuyOrder: row.BuyOrder,
@@ -298,6 +355,16 @@ func (s *PaymentsService) applyKhipuPayment(ctx context.Context, portalToken str
 		} else if strings.TrimSpace(portalToken) != "" {
 			_ = s.Repo.MarkPaymentTokenPaid(ctx, portalToken)
 		}
+		s.record(ctx, audit.Event{
+			Domain:     audit.DomainPayment,
+			Action:     audit.ActionPaymentCommitted,
+			ActorRole:  "payer",
+			CompanyID:  row.CompanyID,
+			TargetType: audit.TargetPayment,
+			TargetID:   audit.ID(row.ID),
+			Summary:    "Transferencia Khipu confirmada",
+			Meta:       map[string]any{"gateway": khipuGateway, "buy_order": row.BuyOrder, "amount": row.Amount},
+		})
 	}
 	row.Status = "authorized"
 	if row.AuthorizationCode.String == "" {

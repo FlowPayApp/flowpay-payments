@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flowpay/flowpay-payments/internal/audit"
 	"github.com/flowpay/flowpay-payments/internal/domain"
 	"github.com/flowpay/flowpay-payments/internal/gateway/transbank"
 	"github.com/flowpay/flowpay-payments/internal/model"
@@ -151,6 +152,16 @@ func (s *PaymentsService) StartWebpayCheckout(ctx context.Context, portalToken s
 	bridgeURL := strings.TrimSuffix(s.Webpay.PublicBaseURL, "/") +
 		"/api/public/webpay/bridge/" + fmt.Sprintf("%d", txID)
 
+	s.record(ctx, audit.Event{
+		Domain:     audit.DomainPayment,
+		Action:     audit.ActionCheckoutStarted,
+		ActorRole:  "payer",
+		CompanyID:  pt.CompanyID,
+		TargetType: audit.TargetPayment,
+		TargetID:   audit.ID(txID),
+		Summary:    "Se inició un pago con Webpay",
+		Meta:       map[string]any{"gateway": "transbank_webpay_plus", "buy_order": buyOrder, "amount": amountCLP, "charge_ids": chargeIDs(charges)},
+	})
 	return &WebpayCheckoutResult{
 		RedirectURL: bridgeURL,
 		BuyOrder:    buyOrder,
@@ -214,12 +225,34 @@ func (s *PaymentsService) CommitWebpayReturn(ctx context.Context, portalToken, t
 			TransbankStatus: "commit_error",
 			RawCommit:       rawCommit,
 		})
+		s.record(ctx, audit.Event{
+			Domain:     audit.DomainPayment,
+			Action:     audit.ActionPaymentFailed,
+			Outcome:    audit.OutcomeFailure,
+			ActorRole:  "payer",
+			CompanyID:  row.CompanyID,
+			TargetType: audit.TargetPayment,
+			TargetID:   audit.ID(row.ID),
+			Summary:    "Webpay no confirmó el pago",
+			Meta:       map[string]any{"gateway": row.Gateway, "buy_order": row.BuyOrder, "amount": row.Amount},
+		})
 		return &WebpayCommitResult{Status: "failed", Message: "no se pudo confirmar con Transbank"}, nil
 	}
 
 	if !tbk.Authorized(commitResp) {
 		upd := commitUpdateFromResp(commitResp, rawCommit)
 		_ = s.Repo.UpdatePaymentTransactionAfterCommit(ctx, row.ID, "failed", upd)
+		s.record(ctx, audit.Event{
+			Domain:     audit.DomainPayment,
+			Action:     audit.ActionPaymentFailed,
+			Outcome:    audit.OutcomeFailure,
+			ActorRole:  "payer",
+			CompanyID:  row.CompanyID,
+			TargetType: audit.TargetPayment,
+			TargetID:   audit.ID(row.ID),
+			Summary:    "Pago con Webpay rechazado",
+			Meta:       map[string]any{"gateway": row.Gateway, "buy_order": row.BuyOrder, "amount": row.Amount, "response_code": commitResp.ResponseCode},
+		})
 		return &WebpayCommitResult{
 			Status:   "failed",
 			BuyOrder: commitResp.BuyOrder,
@@ -244,6 +277,22 @@ func (s *PaymentsService) CommitWebpayReturn(ctx context.Context, portalToken, t
 	}
 	_ = s.Repo.MarkPaymentTokenPaid(ctx, portalToken)
 
+	s.record(ctx, audit.Event{
+		Domain:     audit.DomainPayment,
+		Action:     audit.ActionPaymentCommitted,
+		ActorRole:  "payer",
+		CompanyID:  row.CompanyID,
+		TargetType: audit.TargetPayment,
+		TargetID:   audit.ID(row.ID),
+		Summary:    "Pago con Webpay autorizado",
+		Meta: map[string]any{
+			"gateway":            row.Gateway,
+			"buy_order":          row.BuyOrder,
+			"amount":             row.Amount,
+			"authorization_code": commitResp.AuthorizationCode,
+			"card_last4":         transbank.CardLast4(cardNumber(commitResp)),
+		},
+	})
 	row.Status = "authorized"
 	return s.commitResultFromRow(row), nil
 }

@@ -3,6 +3,7 @@ package routes
 import (
 	"net/http"
 
+	"github.com/flowpay/flowpay-payments/internal/audit"
 	"github.com/flowpay/flowpay-payments/internal/controller"
 	"github.com/gin-gonic/gin"
 )
@@ -29,7 +30,7 @@ func Register(r *gin.Engine, deps controller.Deps, jwtMiddleware gin.HandlerFunc
 	r.POST("/api/public/fintoc/notify", fintocPay.Notify)
 
 	api := r.Group("/api")
-	api.Use(jwtMiddleware)
+	api.Use(jwtMiddleware, audit.StampActor())
 	{
 		api.POST("/payment-tokens", tokens.Create)
 		api.POST("/payments", payments.RecordManual)

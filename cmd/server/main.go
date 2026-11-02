@@ -17,6 +17,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/joho/godotenv/autoload"
 
+	"github.com/flowpay/flowpay-payments/internal/audit"
 	"github.com/flowpay/flowpay-payments/internal/config"
 	"github.com/flowpay/flowpay-payments/internal/controller"
 	"github.com/flowpay/flowpay-payments/internal/middleware"
@@ -52,6 +53,9 @@ func main() {
 	if err := repo.EnsureFintocColumns(context.Background()); err != nil {
 		log.Printf("warn: columnas de Fintoc: %v", err)
 	}
+	if err := repo.EnsureAuditEvents(context.Background()); err != nil {
+		log.Printf("warn: auditoría: %v", err)
+	}
 	svc := &service.PaymentsService{
 		Repo: repo,
 		Webpay: &service.WebpayConfig{
@@ -69,6 +73,7 @@ func main() {
 	}
 
 	r := gin.Default()
+	r.Use(audit.StampHTTP())
 	r.Use(func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
 		c.Next()

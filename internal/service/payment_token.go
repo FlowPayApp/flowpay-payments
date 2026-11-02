@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/flowpay/flowpay-payments/internal/audit"
 	"github.com/flowpay/flowpay-payments/internal/model"
 	"github.com/flowpay/flowpay-payments/internal/pkg/paymenttoken"
 )
@@ -23,5 +24,18 @@ func (s *PaymentsService) IssuePaymentToken(ctx context.Context, companyID, clie
 	if err != nil {
 		return nil, err
 	}
-	return s.Repo.InsertPaymentToken(ctx, companyID, clientID, tok, model.PaymentTokenStatusIssued)
+	row, err := s.Repo.InsertPaymentToken(ctx, companyID, clientID, tok, model.PaymentTokenStatusIssued)
+	if err != nil {
+		return nil, err
+	}
+	s.record(ctx, audit.Event{
+		Domain:     audit.DomainPayment,
+		Action:     audit.ActionTokenIssued,
+		CompanyID:  companyID,
+		TargetType: audit.TargetPayment,
+		TargetID:   audit.ID(row.ID),
+		Summary:    "Emitió un enlace de pago",
+		Meta:       map[string]any{"client_id": clientID},
+	})
+	return row, nil
 }
