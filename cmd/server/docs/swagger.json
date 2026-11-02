@@ -1,0 +1,972 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Aplicación de pagos de FlowPay: gestión de pagos, transacciones y notificaciones.",
+        "title": "FlowPay PAYMENTS API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "basePath": "/",
+    "paths": {
+        "/api/payment-tokens": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Genera el enlace de pago de un cliente. company_id es opcional y, si viene, debe coincidir con el del JWT.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Interno"
+                ],
+                "summary": "Crear token de portal de pago",
+                "parameters": [
+                    {
+                        "description": "Cliente",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/controller.createPaymentTokenBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/model.PaymentToken"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/payments": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Pago recibido fuera de la pasarela (efectivo, transferencia ya recibida) sobre un cobro.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Interno"
+                ],
+                "summary": "Registrar pago manual",
+                "parameters": [
+                    {
+                        "description": "Cobro y monto",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/controller.recordPaymentBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/controller.okResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/public/fintoc/notify": {
+            "post": {
+                "description": "Webhook de Fintoc firmado con Fintoc-Signature. Avisos que no corresponden a un cobro se aceptan con 200 y se ignoran.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Webhooks"
+                ],
+                "summary": "Notificación de Fintoc",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Firma del webhook",
+                        "name": "Fintoc-Signature",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Evento de Fintoc",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "400": {
+                        "description": "Bad Request"
+                    },
+                    "503": {
+                        "description": "Service Unavailable"
+                    }
+                }
+            }
+        },
+        "/api/public/fintoc/return/{token}": {
+            "get": {
+                "description": "Redirige al front con el resultado. cancel=1 lo marca como cancelado.",
+                "tags": [
+                    "Fintoc"
+                ],
+                "summary": "Retorno desde Fintoc",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Token del portal de pago",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Orden de compra (buy_order)",
+                        "name": "orden",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "1 si el cliente canceló",
+                        "name": "cancel",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Redirección al front"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/public/khipu/notify": {
+            "post": {
+                "description": "Webhook de Khipu. Responde 503 para que Khipu reintente mientras el pago sigue pendiente.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Webhooks"
+                ],
+                "summary": "Notificación de Khipu",
+                "parameters": [
+                    {
+                        "description": "Aviso de Khipu",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/controller.khipuNotifyBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "503": {
+                        "description": "Service Unavailable"
+                    }
+                }
+            }
+        },
+        "/api/public/khipu/return/{token}": {
+            "get": {
+                "description": "Redirige al front con el resultado. cancel=1 lo marca como cancelado; si Khipu aún no confirma, queda pendiente.",
+                "tags": [
+                    "Khipu"
+                ],
+                "summary": "Retorno desde Khipu",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Token del portal de pago",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Orden de compra (buy_order)",
+                        "name": "orden",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "1 si el cliente canceló",
+                        "name": "cancel",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Redirección al front"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/public/pay/{token}": {
+            "get": {
+                "description": "Cobros pendientes, vencidos y pagados del cliente, más los medios de pago disponibles. Sin login: el token del enlace identifica al cliente.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Portal"
+                ],
+                "summary": "Datos del portal de pago",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Token del portal de pago",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/service.PaymentPortalResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/public/pay/{token}/checkout": {
+            "post": {
+                "description": "method elige la pasarela: webpay (por defecto), khipu o fintoc. Devuelve la URL a la que hay que redirigir al cliente.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Portal"
+                ],
+                "summary": "Iniciar pago",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Token del portal de pago",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Cobros a pagar y medio de pago",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/controller.checkoutBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/service.WebpayCheckoutResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/public/pay/{token}/commit": {
+            "post": {
+                "description": "Confirma la transacción en Transbank (commit). token_ws va en el body o, si falta, en la query.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Webpay"
+                ],
+                "summary": "Confirmar pago Webpay",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Token del portal de pago",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Token de Webpay",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/controller.commitBody"
+                        }
+                    },
+                    {
+                        "type": "string",
+                        "description": "Token de Webpay (alternativa al body)",
+                        "name": "token_ws",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/service.WebpayCommitResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/public/pay/{token}/fintoc/status": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Fintoc"
+                ],
+                "summary": "Estado de pago Fintoc",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Token del portal de pago",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Orden de compra (buy_order)",
+                        "name": "orden",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/service.WebpayCommitResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/public/pay/{token}/khipu/status": {
+            "get": {
+                "description": "Consulta a Khipu y sincroniza el estado de la transacción.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Khipu"
+                ],
+                "summary": "Estado de pago Khipu",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Token del portal de pago",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Orden de compra (buy_order)",
+                        "name": "orden",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/service.WebpayCommitResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/public/webpay/bridge/{id}": {
+            "get": {
+                "description": "Página HTML que envía por POST el token_ws al formulario de Transbank.",
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "Webpay"
+                ],
+                "summary": "Puente hacia Webpay",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "ID de la transacción",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Página HTML",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/public/webpay/return/{token}": {
+            "get": {
+                "description": "return_url que llama Transbank. Confirma el pago y redirige al front con el resultado. Sin token_ws (pago anulado) redirige como fallido.",
+                "tags": [
+                    "Webpay"
+                ],
+                "summary": "Retorno desde Webpay",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Token del portal de pago",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Token de Webpay",
+                        "name": "token_ws",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Token cuando el cliente anula el pago",
+                        "name": "TBK_TOKEN",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Redirección al front"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "return_url que llama Transbank. Confirma el pago y redirige al front con el resultado. Sin token_ws (pago anulado) redirige como fallido.",
+                "tags": [
+                    "Webpay"
+                ],
+                "summary": "Retorno desde Webpay",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Token del portal de pago",
+                        "name": "token",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Token de Webpay",
+                        "name": "token_ws",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Token cuando el cliente anula el pago",
+                        "name": "TBK_TOKEN",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Redirección al front"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/controller.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Salud"
+                ],
+                "summary": "Estado del servicio",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "controller.checkoutBody": {
+            "type": "object",
+            "properties": {
+                "charge_refs": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "method": {
+                    "type": "string"
+                }
+            }
+        },
+        "controller.commitBody": {
+            "type": "object",
+            "properties": {
+                "token_ws": {
+                    "type": "string"
+                }
+            }
+        },
+        "controller.createPaymentTokenBody": {
+            "type": "object",
+            "properties": {
+                "client_id": {
+                    "type": "integer"
+                },
+                "company_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "controller.errorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "token no encontrado"
+                }
+            }
+        },
+        "controller.khipuNotifyBody": {
+            "type": "object",
+            "properties": {
+                "payment_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "controller.okResponse": {
+            "type": "object",
+            "properties": {
+                "ok": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "controller.recordPaymentBody": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "charge_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.PaymentToken": {
+            "type": "object",
+            "properties": {
+                "client_id": {
+                    "type": "integer"
+                },
+                "company_id": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.PaymentPortalClient": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.PaymentPortalCompany": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "transfer_instructions": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.PaymentPortalMethods": {
+            "type": "object",
+            "properties": {
+                "fintoc": {
+                    "type": "boolean"
+                },
+                "khipu": {
+                    "type": "boolean"
+                },
+                "transfer": {
+                    "type": "boolean"
+                },
+                "webpay": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "service.PaymentPortalResponse": {
+            "type": "object",
+            "properties": {
+                "charges": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.PortalCharge"
+                    }
+                },
+                "client": {
+                    "$ref": "#/definitions/service.PaymentPortalClient"
+                },
+                "company": {
+                    "$ref": "#/definitions/service.PaymentPortalCompany"
+                },
+                "issued_at": {
+                    "type": "string"
+                },
+                "methods": {
+                    "$ref": "#/definitions/service.PaymentPortalMethods"
+                },
+                "token_status": {
+                    "type": "string"
+                },
+                "totals": {
+                    "$ref": "#/definitions/service.PaymentPortalTotals"
+                }
+            }
+        },
+        "service.PaymentPortalTotals": {
+            "type": "object",
+            "properties": {
+                "overdue": {
+                    "type": "number"
+                },
+                "paid": {
+                    "type": "number"
+                },
+                "pending": {
+                    "type": "number"
+                }
+            }
+        },
+        "service.PortalCharge": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "attachment_ext": {
+                    "type": "string"
+                },
+                "attachment_token": {
+                    "type": "string"
+                },
+                "due_date": {
+                    "type": "string"
+                },
+                "ref": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.WebpayCheckoutResult": {
+            "type": "object",
+            "properties": {
+                "buy_order": {
+                    "type": "string"
+                },
+                "redirect_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.WebpayCommitResult": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number"
+                },
+                "authorization_code": {
+                    "type": "string"
+                },
+                "buy_order": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "method": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "Token JWT con formato Bearer {token}",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    }
+}

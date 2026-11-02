@@ -16,6 +16,10 @@ import (
 	"github.com/gin-gonic/gin"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/joho/godotenv/autoload"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
+
+	_ "github.com/flowpay/flowpay-payments/cmd/server/docs"
 
 	"github.com/flowpay/flowpay-payments/internal/config"
 	"github.com/flowpay/flowpay-payments/internal/controller"
@@ -26,6 +30,15 @@ import (
 	"github.com/flowpay/flowpay-payments/internal/service"
 )
 
+// @title FlowPay PAYMENTS API
+// @version 1.0
+// @description Aplicación de pagos de FlowPay: gestión de pagos, transacciones y notificaciones.
+// @BasePath /
+
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Token JWT con formato Bearer {token}
 func main() {
 	cfg := config.Load()
 	if config.Production() {
@@ -94,6 +107,9 @@ func main() {
 		}
 	}
 	routes.Register(r, deps, middleware.BearerJWT(cfg.JWTSecret, revokedList.Has))
+	if !config.Production() {
+		r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	}
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: r}
 	go func() {

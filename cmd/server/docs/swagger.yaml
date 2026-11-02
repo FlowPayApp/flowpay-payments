@@ -1,0 +1,647 @@
+basePath: /
+definitions:
+  controller.checkoutBody:
+    properties:
+      charge_refs:
+        items:
+          type: string
+        type: array
+      method:
+        type: string
+    type: object
+  controller.commitBody:
+    properties:
+      token_ws:
+        type: string
+    type: object
+  controller.createPaymentTokenBody:
+    properties:
+      client_id:
+        type: integer
+      company_id:
+        type: integer
+    type: object
+  controller.errorResponse:
+    properties:
+      error:
+        example: token no encontrado
+        type: string
+    type: object
+  controller.khipuNotifyBody:
+    properties:
+      payment_id:
+        type: string
+    type: object
+  controller.okResponse:
+    properties:
+      ok:
+        example: true
+        type: boolean
+    type: object
+  controller.recordPaymentBody:
+    properties:
+      amount:
+        type: number
+      charge_id:
+        type: integer
+    type: object
+  model.PaymentToken:
+    properties:
+      client_id:
+        type: integer
+      company_id:
+        type: integer
+      created_at:
+        type: string
+      id:
+        type: integer
+      status:
+        type: string
+      token:
+        type: string
+    type: object
+  service.PaymentPortalClient:
+    properties:
+      label:
+        type: string
+    type: object
+  service.PaymentPortalCompany:
+    properties:
+      name:
+        type: string
+      transfer_instructions:
+        type: string
+    type: object
+  service.PaymentPortalMethods:
+    properties:
+      fintoc:
+        type: boolean
+      khipu:
+        type: boolean
+      transfer:
+        type: boolean
+      webpay:
+        type: boolean
+    type: object
+  service.PaymentPortalResponse:
+    properties:
+      charges:
+        items:
+          $ref: '#/definitions/service.PortalCharge'
+        type: array
+      client:
+        $ref: '#/definitions/service.PaymentPortalClient'
+      company:
+        $ref: '#/definitions/service.PaymentPortalCompany'
+      issued_at:
+        type: string
+      methods:
+        $ref: '#/definitions/service.PaymentPortalMethods'
+      token_status:
+        type: string
+      totals:
+        $ref: '#/definitions/service.PaymentPortalTotals'
+    type: object
+  service.PaymentPortalTotals:
+    properties:
+      overdue:
+        type: number
+      paid:
+        type: number
+      pending:
+        type: number
+    type: object
+  service.PortalCharge:
+    properties:
+      amount:
+        type: number
+      attachment_ext:
+        type: string
+      attachment_token:
+        type: string
+      due_date:
+        type: string
+      ref:
+        type: string
+      status:
+        type: string
+    type: object
+  service.WebpayCheckoutResult:
+    properties:
+      buy_order:
+        type: string
+      redirect_url:
+        type: string
+    type: object
+  service.WebpayCommitResult:
+    properties:
+      amount:
+        type: number
+      authorization_code:
+        type: string
+      buy_order:
+        type: string
+      message:
+        type: string
+      method:
+        type: string
+      status:
+        type: string
+    type: object
+info:
+  contact: {}
+  description: 'Aplicación de pagos de FlowPay: gestión de pagos, transacciones y
+    notificaciones.'
+  title: FlowPay PAYMENTS API
+  version: "1.0"
+paths:
+  /api/payment-tokens:
+    post:
+      consumes:
+      - application/json
+      description: Genera el enlace de pago de un cliente. company_id es opcional
+        y, si viene, debe coincidir con el del JWT.
+      parameters:
+      - description: Cliente
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/controller.createPaymentTokenBody'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.PaymentToken'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Crear token de portal de pago
+      tags:
+      - Interno
+  /api/payments:
+    post:
+      consumes:
+      - application/json
+      description: Pago recibido fuera de la pasarela (efectivo, transferencia ya
+        recibida) sobre un cobro.
+      parameters:
+      - description: Cobro y monto
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/controller.recordPaymentBody'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/controller.okResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Registrar pago manual
+      tags:
+      - Interno
+  /api/public/fintoc/notify:
+    post:
+      consumes:
+      - application/json
+      description: Webhook de Fintoc firmado con Fintoc-Signature. Avisos que no corresponden
+        a un cobro se aceptan con 200 y se ignoran.
+      parameters:
+      - description: Firma del webhook
+        in: header
+        name: Fintoc-Signature
+        required: true
+        type: string
+      - description: Evento de Fintoc
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+        "503":
+          description: Service Unavailable
+      summary: Notificación de Fintoc
+      tags:
+      - Webhooks
+  /api/public/fintoc/return/{token}:
+    get:
+      description: Redirige al front con el resultado. cancel=1 lo marca como cancelado.
+      parameters:
+      - description: Token del portal de pago
+        in: path
+        name: token
+        required: true
+        type: string
+      - description: Orden de compra (buy_order)
+        in: query
+        name: orden
+        required: true
+        type: string
+      - description: 1 si el cliente canceló
+        in: query
+        name: cancel
+        type: string
+      responses:
+        "302":
+          description: Redirección al front
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+      summary: Retorno desde Fintoc
+      tags:
+      - Fintoc
+  /api/public/khipu/notify:
+    post:
+      consumes:
+      - application/json
+      description: Webhook de Khipu. Responde 503 para que Khipu reintente mientras
+        el pago sigue pendiente.
+      parameters:
+      - description: Aviso de Khipu
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/controller.khipuNotifyBody'
+      responses:
+        "200":
+          description: OK
+        "503":
+          description: Service Unavailable
+      summary: Notificación de Khipu
+      tags:
+      - Webhooks
+  /api/public/khipu/return/{token}:
+    get:
+      description: Redirige al front con el resultado. cancel=1 lo marca como cancelado;
+        si Khipu aún no confirma, queda pendiente.
+      parameters:
+      - description: Token del portal de pago
+        in: path
+        name: token
+        required: true
+        type: string
+      - description: Orden de compra (buy_order)
+        in: query
+        name: orden
+        required: true
+        type: string
+      - description: 1 si el cliente canceló
+        in: query
+        name: cancel
+        type: string
+      responses:
+        "302":
+          description: Redirección al front
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+      summary: Retorno desde Khipu
+      tags:
+      - Khipu
+  /api/public/pay/{token}:
+    get:
+      description: 'Cobros pendientes, vencidos y pagados del cliente, más los medios
+        de pago disponibles. Sin login: el token del enlace identifica al cliente.'
+      parameters:
+      - description: Token del portal de pago
+        in: path
+        name: token
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.PaymentPortalResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+      summary: Datos del portal de pago
+      tags:
+      - Portal
+  /api/public/pay/{token}/checkout:
+    post:
+      consumes:
+      - application/json
+      description: 'method elige la pasarela: webpay (por defecto), khipu o fintoc.
+        Devuelve la URL a la que hay que redirigir al cliente.'
+      parameters:
+      - description: Token del portal de pago
+        in: path
+        name: token
+        required: true
+        type: string
+      - description: Cobros a pagar y medio de pago
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/controller.checkoutBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.WebpayCheckoutResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+      summary: Iniciar pago
+      tags:
+      - Portal
+  /api/public/pay/{token}/commit:
+    post:
+      consumes:
+      - application/json
+      description: Confirma la transacción en Transbank (commit). token_ws va en el
+        body o, si falta, en la query.
+      parameters:
+      - description: Token del portal de pago
+        in: path
+        name: token
+        required: true
+        type: string
+      - description: Token de Webpay
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/controller.commitBody'
+      - description: Token de Webpay (alternativa al body)
+        in: query
+        name: token_ws
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.WebpayCommitResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+      summary: Confirmar pago Webpay
+      tags:
+      - Webpay
+  /api/public/pay/{token}/fintoc/status:
+    get:
+      parameters:
+      - description: Token del portal de pago
+        in: path
+        name: token
+        required: true
+        type: string
+      - description: Orden de compra (buy_order)
+        in: query
+        name: orden
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.WebpayCommitResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+      summary: Estado de pago Fintoc
+      tags:
+      - Fintoc
+  /api/public/pay/{token}/khipu/status:
+    get:
+      description: Consulta a Khipu y sincroniza el estado de la transacción.
+      parameters:
+      - description: Token del portal de pago
+        in: path
+        name: token
+        required: true
+        type: string
+      - description: Orden de compra (buy_order)
+        in: query
+        name: orden
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.WebpayCommitResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+      summary: Estado de pago Khipu
+      tags:
+      - Khipu
+  /api/public/webpay/bridge/{id}:
+    get:
+      description: Página HTML que envía por POST el token_ws al formulario de Transbank.
+      parameters:
+      - description: ID de la transacción
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Página HTML
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            type: string
+      summary: Puente hacia Webpay
+      tags:
+      - Webpay
+  /api/public/webpay/return/{token}:
+    get:
+      description: return_url que llama Transbank. Confirma el pago y redirige al
+        front con el resultado. Sin token_ws (pago anulado) redirige como fallido.
+      parameters:
+      - description: Token del portal de pago
+        in: path
+        name: token
+        required: true
+        type: string
+      - description: Token de Webpay
+        in: query
+        name: token_ws
+        type: string
+      - description: Token cuando el cliente anula el pago
+        in: query
+        name: TBK_TOKEN
+        type: string
+      responses:
+        "302":
+          description: Redirección al front
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+      summary: Retorno desde Webpay
+      tags:
+      - Webpay
+    post:
+      description: return_url que llama Transbank. Confirma el pago y redirige al
+        front con el resultado. Sin token_ws (pago anulado) redirige como fallido.
+      parameters:
+      - description: Token del portal de pago
+        in: path
+        name: token
+        required: true
+        type: string
+      - description: Token de Webpay
+        in: query
+        name: token_ws
+        type: string
+      - description: Token cuando el cliente anula el pago
+        in: query
+        name: TBK_TOKEN
+        type: string
+      responses:
+        "302":
+          description: Redirección al front
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/controller.errorResponse'
+      summary: Retorno desde Webpay
+      tags:
+      - Webpay
+  /health:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Estado del servicio
+      tags:
+      - Salud
+securityDefinitions:
+  BearerAuth:
+    description: Token JWT con formato Bearer {token}
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
