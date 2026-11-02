@@ -142,6 +142,7 @@ func (s *PaymentsService) StartWebpayCheckout(ctx context.Context, portalToken s
 	})
 	if err != nil {
 		_ = s.Repo.FailPaymentTransaction(ctx, txID, "create_error", rawCreate)
+		s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, pt.CompanyID, txID, "payer", "No se pudo iniciar el pago con Webpay", "webpay_create", audit.Cause(err), map[string]any{"gateway": "transbank_webpay_plus", "buy_order": buyOrder, "amount": amountCLP})
 		return nil, fmt.Errorf("transbank create: %w", err)
 	}
 
@@ -217,6 +218,7 @@ func (s *PaymentsService) CommitWebpayReturn(ctx context.Context, portalToken, t
 
 	tbk, err := s.companyWebpayClient(ctx, row.CompanyID)
 	if err != nil {
+		s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, row.CompanyID, row.ID, "payer", "Webpay no confirmó el pago", "webpay_client", audit.Cause(err), map[string]any{"gateway": row.Gateway, "buy_order": row.BuyOrder, "amount": row.Amount})
 		return nil, err
 	}
 	commitResp, rawCommit, err := tbk.Commit(ctx, tokenWS)
@@ -225,34 +227,18 @@ func (s *PaymentsService) CommitWebpayReturn(ctx context.Context, portalToken, t
 			TransbankStatus: "commit_error",
 			RawCommit:       rawCommit,
 		})
-		s.record(ctx, audit.Event{
-			Domain:     audit.DomainPayment,
-			Action:     audit.ActionPaymentFailed,
-			Outcome:    audit.OutcomeFailure,
-			ActorRole:  "payer",
-			CompanyID:  row.CompanyID,
-			TargetType: audit.TargetPayment,
-			TargetID:   audit.ID(row.ID),
-			Summary:    "Webpay no confirmó el pago",
-			Meta:       map[string]any{"gateway": row.Gateway, "buy_order": row.BuyOrder, "amount": row.Amount},
-		})
+		s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, row.CompanyID, row.ID, "payer", "Webpay no confirmó el pago", "webpay_commit", audit.Cause(err), map[string]any{"gateway": row.Gateway, "buy_order": row.BuyOrder, "amount": row.Amount})
 		return &WebpayCommitResult{Status: "failed", Message: "no se pudo confirmar con Transbank"}, nil
 	}
 
 	if !tbk.Authorized(commitResp) {
 		upd := commitUpdateFromResp(commitResp, rawCommit)
 		_ = s.Repo.UpdatePaymentTransactionAfterCommit(ctx, row.ID, "failed", upd)
-		s.record(ctx, audit.Event{
-			Domain:     audit.DomainPayment,
-			Action:     audit.ActionPaymentFailed,
-			Outcome:    audit.OutcomeFailure,
-			ActorRole:  "payer",
-			CompanyID:  row.CompanyID,
-			TargetType: audit.TargetPayment,
-			TargetID:   audit.ID(row.ID),
-			Summary:    "Pago con Webpay rechazado",
-			Meta:       map[string]any{"gateway": row.Gateway, "buy_order": row.BuyOrder, "amount": row.Amount, "response_code": commitResp.ResponseCode},
-		})
+		reason := gatewayStatusPhrase(commitResp.Status)
+		if commitResp.ResponseCode != 0 {
+			reason = fmt.Sprintf("%s, código %d", reason, commitResp.ResponseCode)
+		}
+		s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, row.CompanyID, row.ID, "payer", "Pago con Webpay rechazado", "webpay_rejected", reason, map[string]any{"gateway": row.Gateway, "buy_order": row.BuyOrder, "amount": row.Amount, "response_code": commitResp.ResponseCode})
 		return &WebpayCommitResult{
 			Status:   "failed",
 			BuyOrder: commitResp.BuyOrder,
@@ -262,16 +248,19 @@ func (s *PaymentsService) CommitWebpayReturn(ctx context.Context, portalToken, t
 
 	upd := commitUpdateFromResp(commitResp, rawCommit)
 	if err := s.Repo.UpdatePaymentTransactionAfterCommit(ctx, row.ID, "authorized", upd); err != nil {
+		s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, row.CompanyID, row.ID, "payer", "No se pudo registrar el pago con Webpay", "webpay_store", "no se pudo guardar la confirmación", map[string]any{"gateway": row.Gateway, "buy_order": row.BuyOrder, "amount": row.Amount})
 		return nil, err
 	}
 
 	charges, err := s.Repo.ListPaymentTransactionCharges(ctx, row.ID)
 	if err != nil {
+		s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, row.CompanyID, row.ID, "payer", "No se pudo registrar el pago con Webpay", "webpay_store", "no se pudieron leer los cobros del pago", map[string]any{"gateway": row.Gateway, "buy_order": row.BuyOrder, "amount": row.Amount})
 		return nil, err
 	}
 	gwRef := commitResp.AuthorizationCode
 	for _, link := range charges {
 		if err := s.Repo.MarkChargePaidWebpay(ctx, link.ChargeID, link.Amount, row.ID, gwRef); err != nil {
+			s.noteGateway(ctx, audit.ActionPaymentFailed, audit.OutcomeFailure, row.CompanyID, row.ID, "payer", "No se pudo registrar el pago con Webpay", "webpay_store", "no se pudo marcar el cobro como pagado", map[string]any{"gateway": row.Gateway, "buy_order": row.BuyOrder, "amount": row.Amount})
 			return nil, err
 		}
 	}

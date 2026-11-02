@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -85,8 +86,9 @@ func main() {
 		JWTSecret:      cfg.JWTSecret,
 	}
 
-	r := gin.Default()
-	r.Use(audit.StampHTTP())
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	r.Use(gin.Logger(), gin.Recovery(), audit.StampHTTP())
 	r.Use(func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
 		c.Next()
@@ -129,30 +131,57 @@ func main() {
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
 	_ = db.Close()
-	log.Println("flowpay-payments detenido")
+	log.Println("servidor detenido")
 }
 
 func printStartup(db *sql.DB, cfg config.Config, webpayOn bool) {
-	log.Println("╔══════════════════════════════════════════════════════╗")
-	log.Println("║ FlowPay Payments · microservicio de pagos            ║")
-	log.Println("╠══════════════════════════════════════════════════════╣")
-	log.Printf("║ HTTP: %s", cfg.Addr)
-	log.Printf("║ Health: GET %s/health", cfg.Addr)
-	log.Printf("║ DB: %s", safeDSN(cfg.DSN))
+	const (
+		reset  = "\033[0m"
+		bold   = "\033[1m"
+		cyan   = "\033[36m"
+		green  = "\033[32m"
+		yellow = "\033[33m"
+	)
+	ok := func(v string) string { return green + "OK" + reset + " " + v }
+	warn := func(v string) string { return yellow + "WARN" + reset + " " + v }
+
+	log.Println(cyan + "╔══════════════════════════════════════════════════════╗" + reset)
+	log.Println(cyan + "║" + reset + " " + bold + "FlowPay Payments · Estado de inicio" + reset + "            " + cyan + "║" + reset)
+	log.Println(cyan + "╠══════════════════════════════════════════════════════╣" + reset)
+	log.Printf(cyan+"║"+reset+" %s", ok("DB conectada"))
+	log.Printf(cyan+"║"+reset+" %s", ok("DB destino: "+safeDSN(cfg.DSN)))
+	log.Printf(cyan+"║"+reset+" %s", ok("HTTP listening en "+cfg.Addr))
+	log.Printf(cyan+"║"+reset+" %s", ok("Healthcheck: GET "+cfg.Addr+"/health"))
 	if webpayOn {
-		log.Printf("║ Webpay: credencial de cada empresa (%s)", cfg.TransbankEnvironment)
+		log.Printf(cyan+"║"+reset+" %s", ok("Webpay: credencial de cada empresa ("+cfg.TransbankEnvironment+")"))
 	} else {
-		log.Println("║ Webpay: sin clave de cifrado; el enlace no cobra con tarjeta")
+		log.Printf(cyan+"║"+reset+" %s", warn("Webpay sin clave de cifrado; el enlace no cobra con tarjeta"))
 	}
-	if cfg.PublicBaseURL == "" {
-		log.Println("║ Webpay, Khipu y Fintoc: WARN — configure FLOWPAY_PAYMENTS_PUBLIC_BASE_URL")
+	if strings.TrimSpace(cfg.PublicBaseURL) == "" {
+		log.Printf(cyan+"║"+reset+" %s", warn("FLOWPAY_PAYMENTS_PUBLIC_BASE_URL vacía"))
+	} else {
+		log.Printf(cyan+"║"+reset+" %s", ok("URL pública de retornos: "+cfg.PublicBaseURL))
 	}
-	for _, t := range []string{"payment_tokens", "payment_transactions", "charges", "payments"} {
+	if strings.TrimSpace(cfg.JWTSecret) == "" {
+		log.Printf(cyan+"║"+reset+" %s", warn("FLOWPAY_JWT_SECRET vacío (modo dev)"))
+	} else {
+		log.Printf(cyan+"║"+reset+" %s", ok("JWT secret cargado"))
+	}
+
+	required := []string{"payment_tokens", "payment_transactions", "charges", "payments"}
+	var miss []string
+	for _, t := range required {
 		if !tableExists(db, t) {
-			log.Printf("║ WARN: falta tabla %s — ejecuta Mysql/postgresql_migration/", t)
+			miss = append(miss, t)
 		}
 	}
-	log.Println("╚══════════════════════════════════════════════════════╝")
+	if len(miss) == 0 {
+		log.Printf(cyan+"║"+reset+" %s", ok("Tablas críticas en public: "+strings.Join(required, ", ")))
+	} else {
+		log.Printf(cyan+"║"+reset+" %s", warn("Faltan tablas: "+strings.Join(miss, ", ")))
+	}
+	log.Printf(cyan+"║"+reset+" %s", fmt.Sprintf("%sAPI base: /api/*%s", bold, reset))
+	log.Println(cyan + "╚══════════════════════════════════════════════════════╝" + reset)
 }
 
 func tableExists(db *sql.DB, name string) bool {

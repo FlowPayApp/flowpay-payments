@@ -13,6 +13,8 @@ type Decision struct {
 	Amount    int64
 	Currency  string
 	PaymentID string
+	Status    string
+	Reason    string
 }
 
 func Interpret(raw []byte) (Decision, error) {
@@ -64,6 +66,7 @@ func Interpret(raw []byte) (Decision, error) {
 		out.PaymentID = strings.TrimSpace(data.ID)
 		if data.PaymentType != "" && !strings.EqualFold(data.PaymentType, "bank_transfer") {
 			out.Action = "mismatch"
+			out.Reason = "el medio de pago no es una transferencia"
 			return out, nil
 		}
 	default:
@@ -76,6 +79,7 @@ func Interpret(raw []byte) (Decision, error) {
 		if pi.Amount > 0 {
 			if out.Amount > 0 && pi.Amount != out.Amount {
 				out.Action = "mismatch"
+				out.Reason = "el monto no coincide"
 				return out, nil
 			}
 			out.Amount = pi.Amount
@@ -88,6 +92,7 @@ func Interpret(raw []byte) (Decision, error) {
 		}
 		if pi.PaymentType != "" && !strings.EqualFold(pi.PaymentType, "bank_transfer") {
 			out.Action = "mismatch"
+			out.Reason = "el medio de pago no es una transferencia"
 			return out, nil
 		}
 		if strings.TrimSpace(pi.Status) != "" {
@@ -95,6 +100,7 @@ func Interpret(raw []byte) (Decision, error) {
 		}
 	}
 
+	out.Status = status
 	switch {
 	case eventType == "payment_intent.succeeded" || status == "succeeded":
 		out.Action = "pay"
