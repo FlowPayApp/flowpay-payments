@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flowpay/flowpay-payments/internal/audit"
 	"github.com/flowpay/flowpay-payments/internal/domain"
 	"github.com/flowpay/flowpay-payments/internal/gateway/fintoc"
 	"github.com/flowpay/flowpay-payments/internal/model"
@@ -117,6 +118,16 @@ func (s *PaymentsService) StartFintocCheckout(ctx context.Context, portalToken s
 	if err := s.Repo.UpdatePaymentTransactionWebpayCreate(ctx, txID, created.ID, created.RedirectURL, "redirected", rawCreate); err != nil {
 		return nil, err
 	}
+	s.record(ctx, audit.Event{
+		Domain:     audit.DomainPayment,
+		Action:     audit.ActionCheckoutStarted,
+		ActorRole:  "payer",
+		CompanyID:  pt.CompanyID,
+		TargetType: audit.TargetPayment,
+		TargetID:   audit.ID(txID),
+		Summary:    "Se inició un pago con Fintoc",
+		Meta:       map[string]any{"gateway": fintocGateway, "buy_order": buyOrder, "amount": amountCLP, "charge_ids": chargeIDs(charges)},
+	})
 	return &WebpayCheckoutResult{
 		RedirectURL: created.RedirectURL,
 		BuyOrder:    buyOrder,
@@ -151,11 +162,32 @@ func (s *PaymentsService) NotifyFintoc(ctx context.Context, signature string, ra
 		return err
 	}
 	if strings.TrimSpace(webhookSecret) == "" || !fintoc.VerifySignature(signature, webhookSecret, raw, now) {
+		s.record(ctx, audit.Event{
+			Domain:     audit.DomainPayment,
+			Action:     audit.ActionWebhookRejected,
+			Outcome:    audit.OutcomeDenied,
+			ActorRole:  "webhook",
+			CompanyID:  row.CompanyID,
+			TargetType: audit.TargetPayment,
+			TargetID:   audit.ID(row.ID),
+			Summary:    "Webhook de Fintoc rechazado",
+			Meta:       map[string]any{"gateway": fintocGateway, "reason": "firma"},
+		})
 		return domain.ErrFintocSignature
 	}
 	if decision.Action == "ignore" {
 		return nil
 	}
+	s.record(ctx, audit.Event{
+		Domain:     audit.DomainPayment,
+		Action:     audit.ActionWebhookAccepted,
+		ActorRole:  "webhook",
+		CompanyID:  row.CompanyID,
+		TargetType: audit.TargetPayment,
+		TargetID:   audit.ID(row.ID),
+		Summary:    "Webhook de Fintoc aceptado",
+		Meta:       map[string]any{"gateway": fintocGateway, "buy_order": row.BuyOrder},
+	})
 	return s.applyFintocDecision(ctx, row, decision, raw)
 }
 
@@ -209,6 +241,17 @@ func (s *PaymentsService) applyFintocDecision(ctx context.Context, row *model.Pa
 	}
 	if decision.Action == "fail" {
 		_ = s.Repo.FailPaymentTransaction(ctx, row.ID, "failed", raw)
+		s.record(ctx, audit.Event{
+			Domain:     audit.DomainPayment,
+			Action:     audit.ActionPaymentFailed,
+			Outcome:    audit.OutcomeFailure,
+			ActorRole:  "webhook",
+			CompanyID:  row.CompanyID,
+			TargetType: audit.TargetPayment,
+			TargetID:   audit.ID(row.ID),
+			Summary:    "La transferencia Fintoc no se completó",
+			Meta:       map[string]any{"gateway": fintocGateway, "buy_order": row.BuyOrder, "amount": row.Amount},
+		})
 		return nil
 	}
 	if decision.Action != "pay" {
@@ -258,6 +301,16 @@ func (s *PaymentsService) applyFintocDecision(ctx context.Context, row *model.Pa
 	if row.PaymentTokenID.Valid {
 		_ = s.Repo.MarkPaymentTokenPaidByID(ctx, row.PaymentTokenID.Int64)
 	}
+	s.record(ctx, audit.Event{
+		Domain:     audit.DomainPayment,
+		Action:     audit.ActionPaymentCommitted,
+		ActorRole:  "webhook",
+		CompanyID:  row.CompanyID,
+		TargetType: audit.TargetPayment,
+		TargetID:   audit.ID(row.ID),
+		Summary:    "Transferencia Fintoc confirmada",
+		Meta:       map[string]any{"gateway": fintocGateway, "buy_order": row.BuyOrder, "amount": row.Amount},
+	})
 	return nil
 }
 

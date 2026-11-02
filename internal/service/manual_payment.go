@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"github.com/flowpay/flowpay-payments/internal/audit"
 )
 
 func (s *PaymentsService) RecordManualPayment(ctx context.Context, companyID, chargeID int64, amount float64) error {
@@ -17,7 +19,19 @@ func (s *PaymentsService) RecordManualPayment(ctx context.Context, companyID, ch
 	if amount < ch.Amount-0.01 {
 		return errors.New("amount must cover charge total for MVP")
 	}
-	return s.Repo.MarkChargePaidManual(ctx, chargeID, amount)
+	if err := s.Repo.MarkChargePaidManual(ctx, chargeID, amount); err != nil {
+		return err
+	}
+	s.record(ctx, audit.Event{
+		Domain:     audit.DomainPayment,
+		Action:     audit.ActionManualPayment,
+		CompanyID:  companyID,
+		TargetType: audit.TargetCharge,
+		TargetID:   audit.ID(chargeID),
+		Summary:    "Registró un pago manual",
+		Meta:       map[string]any{"amount": amount},
+	})
+	return nil
 }
 
 func IsNotFound(err error) bool {
