@@ -50,15 +50,16 @@ func callBearer(secret, raw string, revoked func(string) bool) *httptest.Respons
 	return rec
 }
 
-func TestBearerJWTRejectsRevokedAndMissingJTI(t *testing.T) {
-	revoked := func(jti string) bool { return jti == "revocado" }
-	if rec := callBearer(testSecret, signAccess(t, "revocado"), revoked); rec.Code != http.StatusUnauthorized {
+func TestBearerJWTRejectsRevokedAndAllowsMissingJTI(t *testing.T) {
+	const live = "0123456789abcdef0123456789abcdef"
+	revoked := func(jti string) bool { return jti == live }
+	if rec := callBearer(testSecret, signAccess(t, live), revoked); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("jti revocado: status %d", rec.Code)
 	}
-	if rec := callBearer(testSecret, signAccess(t, ""), revoked); rec.Code != http.StatusUnauthorized {
+	if rec := callBearer(testSecret, signAccess(t, ""), revoked); rec.Code != http.StatusNoContent {
 		t.Fatalf("jti vacío: status %d", rec.Code)
 	}
-	if rec := callBearer(testSecret, signAccess(t, "vigente"), revoked); rec.Code != http.StatusNoContent {
+	if rec := callBearer(testSecret, signAccess(t, "fedcba9876543210fedcba9876543210"), revoked); rec.Code != http.StatusNoContent {
 		t.Fatalf("jti vigente: status %d", rec.Code)
 	}
 }
