@@ -5,6 +5,7 @@ import (
 
 	"github.com/flowpay/flowpay-payments/internal/audit"
 	"github.com/flowpay/flowpay-payments/internal/controller"
+	"github.com/flowpay/flowpay-payments/internal/middleware"
 	"github.com/gin-gonic/gin"
 )
 
@@ -16,12 +17,17 @@ func Register(r *gin.Engine, deps controller.Deps, jwtMiddleware gin.HandlerFunc
 	tokens := controller.PaymentTokenController{Deps: deps}
 	payments := controller.PaymentController{Deps: deps}
 
-	r.GET("/api/public/pay/:token", portal.GetPortal)
+	payLimit := middleware.PublicPaymentLimit(func(c *gin.Context) {
+		if deps.Svc != nil {
+			deps.Svc.NotePublicPayLimited(c.Request.Context())
+		}
+	})
+	r.GET("/api/public/pay/:token", payLimit, portal.GetPortal)
 	r.POST("/api/public/pay/:token/checkout", webpay.Checkout)
 	r.POST("/api/public/pay/:token/commit", webpay.Commit)
 	r.GET("/api/public/pay/:token/khipu/status", khipu.Status)
-	r.GET("/api/public/webpay/return/:token", webpay.Return)
-	r.POST("/api/public/webpay/return/:token", webpay.Return)
+	r.GET("/api/public/webpay/return/:token", payLimit, webpay.Return)
+	r.POST("/api/public/webpay/return/:token", payLimit, webpay.Return)
 	r.GET("/api/public/webpay/bridge/:id", webpay.Bridge)
 	r.GET("/api/public/khipu/return/:token", khipu.Return)
 	r.POST("/api/public/khipu/notify", khipu.Notify)

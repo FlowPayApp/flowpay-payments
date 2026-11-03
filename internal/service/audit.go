@@ -18,6 +18,19 @@ func (s *PaymentsService) record(ctx context.Context, e audit.Event) {
 	}
 }
 
+func (s *PaymentsService) NotePublicPayLimited(ctx context.Context) {
+	s.record(ctx, audit.Event{
+		Domain:  audit.DomainPayment,
+		Action:  audit.ActionPublicPayLimited,
+		Outcome: audit.OutcomeDenied,
+		Summary: "Bloqueó el portal de pago: demasiadas solicitudes desde la misma IP",
+		Meta: map[string]any{
+			"code":   "public_pay_limited",
+			"reason": "se superó el tope de 60 solicitudes por minuto",
+		},
+	})
+}
+
 func (s *PaymentsService) noteGateway(ctx context.Context, action, outcome string, companyID, txID int64, role, summary, code, reason string, meta map[string]any) {
 	if meta == nil {
 		meta = map[string]any{}
